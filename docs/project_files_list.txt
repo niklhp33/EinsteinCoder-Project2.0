@@ -1,0 +1,33 @@
+--- Einstein Coder Project Files List ---
+Generated on: 2025-07-13 03:06:03
+Relative paths from project_2.0 folder, with existence check:
+
+01. config.py (Exists)
+02. models.py (Exists)
+03. utils/__init__.py (Exists)
+04. utils/shell_utils.py (Exists)
+05. utils/gcs_utils.py (Exists)
+06. utils/cleanup.py (Exists)
+07. utils/ffmpeg_utils.py (Exists)
+08. utils/audio_utils.py (MISSING!)
+09. utils/video_utils.py (Exists)
+10. ai_integration/__init__.py (Exists)
+11. ai_integration/gemini_integration.py (Exists)
+12. ai_integration/speech_synthesis.py (Exists)
+13. ai_integration/image_video_generation.py (Exists)
+14. media_processing/__init__.py (Exists)
+15. media_processing/video_editor.py (Exists)
+16. pipeline.py (Exists)
+17. ui_pipeline.py (Exists)
+18. new_features/project_roadmap.py (Exists)
+19. new_features/advanced_tts_controls.py (Exists)
+20. new_features/cost_analyzer.py (Exists)
+21. new_features/dynamic_visual_cues.py (Exists)
+22. new_features/interactive_content_generation.py (Exists)
+23. new_features/intro_outro_templates.py (Exists)
+24. new_features/long_form_adaptation.py (Exists)
+25. new_features/niche_content_specialization.py (Exists)
+26. new_features/integrated_music_library.py (Exists)
+27. new_features/multilingual_support.py (Exists)
+
+--- END OF LIST ---
