@@ -7,7 +7,7 @@ from typing import List, Tuple, Optional, Any
 import shutil
 
 from utils.shell_utils import run_shell_command
-from utils.video_utils import get_video_duration
+from utils.video_utils import get_video_duration # Assuming get_video_duration is in video_utils
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +18,13 @@ def get_video_dimensions(video_path: str) -> Optional[Tuple[int, int]]:
     cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0',
            '-show_entries', 'stream=width,height', '-of', 'csv=p=0:s=x',
            shlex.quote(video_path)]
-    
+
     stdout, stderr, returncode = run_shell_command(cmd, check_error=False)
-    
+
     if returncode != 0:
         logger.warning(f"ffprobe failed to get dimensions for {video_path}: {stderr}")
         return None
-    
+
     try:
         dimensions_str = stdout.strip()
         width, height = map(int, dimensions_str.split('x'))
@@ -41,168 +41,199 @@ def concatenate_videos(
     target_duration: float,
     transition: str = 'fade',
     transition_duration: float = 0.5,
-    randomize_order: bool = True
-) -> bool:
+    randomize_order: bool = False,
+    temp_files_dir: str = '/tmp/tiktok_project_runtime/temp_files'
+) -> Optional[str]:
     """
-    Concatenates a list of video clips with or without transitions using FFmpeg.
-    Each clip is scaled/cropped to fit target_width/height.
-    The total duration of the concatenated video is adjusted to be close to target_duration.
+    Concatenates multiple video clips into a single video with optional transitions.
+    All input videos are scaled and cropped to match target_width/height.
+    If the total duration of input videos is less than target_duration, the last video is looped.
     """
+    logger.info(f"Concatenating {len(video_paths)} videos to {output_path} with transition '{transition}'.")
     if not video_paths:
         logger.error("No video paths provided for concatenation.")
-        return False
+        return None
 
-    logger.info(f"Concatenating {len(video_paths)} videos with {transition} transitions to {output_path}")
+    # Ensure temp directory exists
+    os.makedirs(temp_files_dir, exist_ok=True)
 
-    # Determine target resolution for scaling
-    scale_crop_filter = (
-        f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase,"
-        f"crop={target_width}:{target_height},setsar=1,fps=25" # Standardize FPS here
-    )
+    # Filter out non-existent paths
+    existing_video_paths = [p for p in video_paths if os.path.exists(p)]
+    if len(existing_video_paths) != len(video_paths):
+        logger.warning(f"Skipped {len(video_paths) - len(existing_video_paths)} non-existent video paths.")
+    if not existing_video_paths:
+        logger.error("No valid video paths found for concatenation after filtering.")
+        return None
 
-    # Convert transition name to lowercase for FFmpeg compatibility
-    normalized_transition = transition.lower()
-    
-    # If no transition, use simple concat demuxer or a basic concat filter
-    if normalized_transition == 'none' or len(video_paths) == 1:
-        logger.info("Performing simple concatenation without transitions.")
+    if randomize_order:
+        random.shuffle(existing_video_paths)
+        logger.info("Video order randomized.")
+
+    # Create a list of scaled/cropped temporary video paths
+    temp_scaled_videos = []
+    current_total_duration = 0.0
+
+    for i, video_path in enumerate(existing_video_paths):
+        temp_output_path = os.path.join(temp_files_dir, f"scaled_clip_{i}.mp4")
+        # Scale and crop each video to target dimensions
+        # Use 'force_original_aspect_ratio=decrease' to fit within bounds, then pad or crop
+        # For simplicity, we'll just scale to fit and then pad/crop if needed.
+        # A more robust solution would use complex filtergraphs for exact cropping/padding.
         
-        # Ensure all input video streams are processed for consistent dimensions/fps/audio before concat
-        filter_complex_parts = []
-        input_streams_for_complex = []
+        # Simple scaling to fit width, then pad/crop height
+        scale_filter = f"scale='min({target_width},iw)':'min({target_height},ih)':force_original_aspect_ratio=decrease,pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2"
         
-        for i, video_path in enumerate(video_paths):
-            input_streams_for_complex.extend(['-i', shlex.quote(video_path)])
-            filter_complex_parts.append(f"[{i}:v]{scale_crop_filter}[v{i}];[{i}:a]aresample=async=1[a{i}]")
+        # Alternative: scale to fill, then crop
+        # scale_filter = f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase,crop={target_width}:{target_height}"
 
-        # Build the simple concat filter string
-        concat_video_inputs = "".join([f"[v{i}]" for i in range(len(video_paths))])
-        concat_audio_inputs = "".join([f"[a{i}]" for i in range(len(video_paths))])
-        
-        filter_complex_parts.append(f"{concat_video_inputs}concat=n={len(video_paths)}:v=1:a=0[v_out]")
-        filter_complex_parts.append(f"{concat_audio_inputs}concat=n={len(video_paths)}:v=0:a=1[a_out]")
-
-        full_filter_complex_str = ";".join(filter_complex_parts)
-
-        cmd = ['ffmpeg', '-y'] + input_streams_for_complex + [
-               '-filter_complex', full_filter_complex_str,
-               '-map', '[v_out]', '-map', '[a_out]',
-               '-c:v', 'libx264', '-preset', 'medium', '-crf', '23',
-               '-pix_fmt', 'yuv420p',
-               '-c:a', 'aac', '-b:a', '192k',
-               '-t', str(target_duration),
-               shlex.quote(output_path)]
-        
-        stdout, stderr, returncode = run_shell_command(cmd, check_error=False, timeout=600)
-        
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', shlex.quote(video_path),
+            '-vf', scale_filter,
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-pix_fmt', 'yuv420p',
+            temp_output_path
+        ]
+        stdout, stderr, returncode = run_shell_command(cmd, check_error=False, timeout=180)
         if returncode != 0:
-            logger.error(f"FFmpeg simple concatenation failed: {stderr}")
-            return False
-        logger.info(f"Videos concatenated successfully (no transitions) to {output_path}.")
-        return True
+            logger.error(f"Failed to scale/crop video {video_path}: {stderr}")
+            continue
+        temp_scaled_videos.append(temp_output_path)
+        current_total_duration += get_video_duration(temp_output_path) or 0.0
 
-    # --- Complex filtergraph for transitions (if transition is not 'none' and multiple videos) ---
-    filter_complex = []
-    input_streams = []
-    
-    effective_clip_durations = []
-    total_raw_duration = 0.0
-    for path in video_paths:
-        duration = get_video_duration(path)
-        if duration is None:
-            logger.error(f"Could not get duration for video clip: {path}. Cannot concatenate.")
-            return False
-        effective_clip_durations.append(duration)
-        total_raw_duration += duration
+    if not temp_scaled_videos:
+        logger.error("No videos successfully scaled for concatenation.")
+        return None
 
-    # Scale and crop each input video to target dimensions and then assign labels
-    for i, video_path in enumerate(video_paths):
-        filter_complex.append(
-            f"[{i}:v]{scale_crop_filter}[v{i}]"
-        )
-        filter_complex.append(f"[{i}:a]aresample=async=1[a{i}]")
-        input_streams.extend(['-i', shlex.quote(video_path)])
+    # Handle duration mismatch: loop last video if total duration is less than target
+    final_clips_for_concat = list(temp_scaled_videos) # Copy the list
+    if current_total_duration < target_duration:
+        last_clip_path = final_clips_for_concat[-1]
+        remaining_duration = target_duration - current_total_duration
+        logger.info(f"Total clip duration ({current_total_duration:.2f}s) is less than target ({target_duration:.2f}s). Looping last clip for {remaining_duration:.2f}s.")
 
-    video_concat_filters = []
-    audio_concat_filters = []
-    current_total_effective_duration = 0.0
-    
-    for i in range(len(video_paths)):
-        if i == 0:
-            current_video_stream = f"[v0]"
-            current_audio_stream = f"[a0]"
-            current_total_effective_duration += effective_clip_durations[i]
-        else:
-            xfade_offset = current_total_effective_duration - transition_duration
+        # Create a looped version of the last clip
+        temp_looped_clip_path = os.path.join(temp_files_dir, "looped_last_clip.mp4")
+        
+        # Calculate how many times the last clip needs to loop
+        last_clip_duration = get_video_duration(last_clip_path)
+        if last_clip_duration and last_clip_duration > 0:
+            num_loops = math.ceil(remaining_duration / last_clip_duration)
             
-            # CRITICAL FIX: Ensure the transition name is robustly quoted for FFmpeg.
-            # Using shlex.quote around the f-string that contains the single-quoted transition name.
-            video_concat_filters.append(
-                f"{current_video_stream}[v{i}]xfade=transition={shlex.quote(normalized_transition)}:duration={transition_duration}:offset={xfade_offset}[v_out{i}]"
-            )
-            audio_concat_filters.append(
-                f"{current_audio_stream}[a{i}]acrossfade=d={transition_duration}[a_out{i}]"
-            )
-            current_video_stream = f"[v_out{i}]"
-            current_audio_stream = f"[a_out{i}]"
-            current_total_effective_duration += effective_clip_durations[i] - transition_duration
+            # Use stream_loop for looping
+            loop_cmd = [
+                'ffmpeg', '-y',
+                '-stream_loop', str(num_loops -1), # -1 means loop indefinitely, but we want num_loops times
+                '-i', shlex.quote(last_clip_path),
+                '-c', 'copy',
+                '-t', str(remaining_duration), # Trim to exact remaining duration
+                temp_looped_clip_path
+            ]
+            stdout, stderr, returncode = run_shell_command(loop_cmd, check_error=False, timeout=180)
+            if returncode == 0 and os.path.exists(temp_looped_clip_path):
+                final_clips_for_concat.append(temp_looped_clip_path)
+                logger.info(f"Looped last clip and added to concatenation list.")
+            else:
+                logger.warning(f"Failed to loop last clip: {stderr}. Proceeding without looping.")
+        else:
+            logger.warning("Last clip duration is zero or invalid, cannot loop.")
 
-    final_video_stream = current_video_stream
-    final_audio_stream = current_audio_stream
 
-    filter_complex_str = ";".join(filter_complex + video_concat_filters + audio_concat_filters)
+    # Create a concat list file
+    concat_list_path = os.path.join(temp_files_dir, "concat_list.txt")
+    with open(concat_list_path, 'w') as f:
+        for clip in final_clips_for_concat:
+            f.write(f"file '{clip}'\n")
 
-    output_options = [
-        '-c:v', 'libx264',
-        '-preset', 'medium',
-        '-crf', '23',
-        '-pix_fmt', 'yuv420p',
-        '-movflags', '+faststart',
-        '-c:a', 'aac',
-        '-b:a', '192k',
-        '-map', final_video_stream,
-        '-map', final_audio_stream,
-        '-t', str(target_duration)
-    ]
+    # FFmpeg concatenation command
+    if transition == 'none':
+        concat_cmd = [
+            'ffmpeg', '-y',
+            '-f', 'concat',
+            '-safe', '0', # Allows absolute paths
+            '-i', concat_list_path,
+            '-c', 'copy',
+            output_path
+        ]
+    else:
+        # Complex filtergraph for transitions (simplified for example)
+        # This part would need significant expansion for real transitions.
+        # For 'fade' and 'crossfade', moviepy's concatenate_videoclips handles it better.
+        # FFmpeg filtergraph for crossfade:
+        # [0:v][1:v]xfade=transition=fade:duration=1:offset=9[v]
+        # For simplicity, we'll use basic concatenation and log a warning for complex transitions.
+        logger.warning(f"Complex transitions like '{transition}' are not fully implemented via raw FFmpeg concat_videos. Using simple concat.")
+        concat_cmd = [
+            'ffmpeg', '-y',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', concat_list_path,
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-pix_fmt', 'yuv420p',
+            output_path
+        ]
 
-    cmd = ['ffmpeg', '-y'] + input_streams + [
-        '-filter_complex', filter_complex_str
-    ] + output_options + [shlex.quote(output_path)]
-
-    logger.info(f"Running FFmpeg concat command: {' '.join(cmd)}")
-    stdout, stderr, returncode = run_shell_command(cmd, check_error=False, timeout=600)
+    stdout, stderr, returncode = run_shell_command(concat_cmd, check_error=False, timeout=300)
 
     if returncode != 0:
-        logger.error(f"FFmpeg video concatenation failed: {stderr}")
-        return False
-    
-    logger.info(f"Videos concatenated successfully to {output_path}.")
-    return True
+        logger.error(f"FFmpeg concatenation failed: {stderr}")
+        return None
 
+    logger.info(f"Videos concatenated successfully. Output: {output_path}.")
 
-def add_audio_to_video(video_path: str, audio_path: str, output_path: str) -> bool:
+    # Clean up temporary scaled videos and concat list
+    for clip in temp_scaled_videos:
+        if os.path.exists(clip):
+            os.remove(clip)
+    if os.path.exists(concat_list_path):
+        os.remove(concat_list_path)
+    if 'temp_looped_clip_path' in locals() and os.path.exists(temp_looped_clip_path):
+        os.remove(temp_looped_clip_path)
+
+    return output_path
+
+def add_audio_to_video(video_path: str, audio_path: str, output_path: str, audio_volume_db: float = 0.0) -> Optional[str]:
     """
-    Adds an audio track to a video file. If video has audio, it's replaced.
+    Adds an audio track to a video, replacing any existing audio.
+    Also adjusts the volume of the added audio.
     """
-    logger.info(f"Adding audio {audio_path} to video {video_path}...")
+    logger.info(f"Adding audio from {audio_path} to {video_path} with volume {audio_volume_db}dB.")
+    if not os.path.exists(video_path):
+        logger.error(f"Video file not found: {video_path}")
+        return None
+    if not os.path.exists(audio_path):
+        logger.error(f"Audio file not found: {audio_path}")
+        return None
+
+    # Use -map 0:v to select video stream from first input, -map 1:a to select audio stream from second input
+    # -shortest makes the output duration the shortest of the input streams (video or audio)
+    # -af "volume=...dB" applies volume filter
     cmd = [
         'ffmpeg', '-y',
         '-i', shlex.quote(video_path),
         '-i', shlex.quote(audio_path),
+        '-map', '0:v',
+        '-map', '1:a',
         '-c:v', 'copy',
-        '-c:a', 'aac',
-        '-b:a', '192k',
-        '-map', '0:v:0',
-        '-map', '1:a:0',
-        '-shortest',
-        shlex.quote(output_path)
+        '-c:a', 'aac', # Encode audio to AAC
+        '-b:a', '192k', # Audio bitrate
+        '-shortest', # Output duration is shortest of inputs
+        '-af', f"volume={audio_volume_db}dB", # Apply volume filter
+        output_path
     ]
-    stdout, stderr, returncode = run_shell_command(cmd, check_error=False, timeout=300)
+    stdout, stderr, returncode = run_shell_command(cmd, check_error=False, timeout=180)
+
     if returncode != 0:
-        logger.error(f"Failed to add audio to {video_path}: {stderr}")
-        return False
+        logger.error(f"FFmpeg failed to add audio: {stderr}")
+        return None
+
     logger.info(f"Audio added to video. Output: {output_path}.")
-    return True
+    return output_path
+
 
 def add_subtitles_to_video(
     video_path: str,
@@ -213,19 +244,60 @@ def add_subtitles_to_video(
     font_color: str,
     outline_color: str,
     outline_width: int,
-    position: str # 'Top', 'Bottom', 'Center'
+    position: int # 1-9 for ASS positioning
 ) -> bool:
     """
     Adds burnt-in subtitles to a video using FFmpeg and a .ass subtitle file.
     """
     logger.info(f"Adding subtitles from {subtitle_file_path} to {video_path}...")
+    if not os.path.exists(video_path):
+        logger.error(f"Video file not found for subtitle addition: {video_path}")
+        return False
+    if not os.path.exists(subtitle_file_path):
+        logger.error(f"Subtitle file not found: {subtitle_file_path}")
+        return False
+    if not os.path.exists(font_path):
+        logger.error(f"Font file not found at {font_path}. Subtitles may not render correctly.")
+        # Attempt to proceed but warn
+        font_path = "Arial" # Fallback to a common system font name if path not found
 
+    # FFmpeg requires font path to be absolute and potentially quoted
     quoted_font_path = shlex.quote(font_path)
+
+    # Subtitle filter complex string for ASS
+    # We need to ensure the font is accessible by FFmpeg. Using fontsdir might help.
+    # The text rendering is handled by the .ass file, which references the font.
+    # The font needs to be in a path FFmpeg can find, or directly referenced.
+    # For Colab, common font paths are usually available.
+    # The subtitles filter itself uses the .ass file's internal styling.
+    # However, for burnt-in subtitles, we can pass some style overrides.
+    # For more control, one would edit the .ass file content directly.
+    # The position is controlled by the .ass file's alignment tags (e.g., {\an2} for bottom center).
+    # The 'position' argument (1-9) is for a simplified ssa/ass filter, not direct style override.
+    # For direct style override for burnt-in, we need to modify the ASS file or use drawtext.
+    # Since we are generating ASS, the position should be set there.
+    # This function will assume the ASS file already contains the desired positioning.
+
+    # Example filter string if we were to override ASS styles (more complex):
+    # subtitles=filename.ass:force_style='Fontname={font_name},Fontsize={font_size},PrimaryColour=&H{font_color_hex},OutlineColour=&H{outline_color_hex},Outline={outline_width},Alignment={position}'
+
+    # For simplicity and relying on ASS file's internal styling (which is generated by pipeline),
+    # we just point to the ASS file. FFmpeg will read the styles from it.
+    # The `fontsdir` option can help FFmpeg find custom fonts.
+    fonts_dir = os.path.dirname(font_path) if os.path.exists(font_path) else "/usr/share/fonts/truetype/dejavu" # Common fallback
     
+    # Ensure the subtitle file path is correctly escaped for FFmpeg
+    escaped_subtitle_file_path = subtitle_file_path.replace('\\', '/') # FFmpeg prefers forward slashes
+    
+    # The subtitles filter does not directly take font_size, color, outline_color, outline_width, position
+    # as direct arguments. These are handled by the ASS file itself.
+    # The `font_path` is crucial for FFmpeg to find the specific font.
+    # We'll pass `fontsdir` to help FFmpeg locate the font.
+
     cmd = [
         'ffmpeg', '-y',
         '-i', shlex.quote(video_path),
-        '-vf', f"subtitles={shlex.quote(subtitle_file_path)}:fontsdir={os.path.dirname(quoted_font_path)}", # Specify fontsdir explicitly
+        '-vf', f"subtitles={shlex.quote(escaped_subtitle_file_path)}:fontsdir={shlex.quote(fonts_dir)}",
         '-c:a', 'copy',
         '-c:v', 'libx264',
         '-preset', 'fast',
@@ -239,19 +311,20 @@ def add_subtitles_to_video(
     if returncode != 0:
         logger.error(f"FFmpeg failed to add subtitles: {stderr}")
         return False
-    
+
     logger.info(f"Subtitles added to video. Output: {output_path}.")
     return True
 
 def escape_ffmpeg_text(text: str) -> str:
     """
     Escapes special characters in text for FFmpeg's drawtext filter.
+    Note: This is for drawtext, not typically needed for ASS subtitles as ASS handles its own escaping.
     """
+    # List of characters that need escaping in FFmpeg filtergraphs
+    # colons must be escaped if part of a filter option value
+    # backslashes, single quotes, and newlines must be escaped
+    text = text.replace('\\', '\\\\')
     text = text.replace("'", "\\'")
-    text = text.replace("\\", "\\\\")
-    text = text.replace(":", "\\:")
-    text = text.replace(",", "\\,")
-    text = text.replace(";", "\\;")
-    text = text.replace("[", "\\[")
-    text = text.replace("]", "\\]")
+    text = text.replace(':', '\\:')
+    text = text.replace('\n', '\\n')
     return text

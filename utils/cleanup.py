@@ -26,7 +26,7 @@ def setup_runtime_directories():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(TEMP_FILES_DIR, exist_ok=True)
     os.makedirs(LOGS_DIR, exist_ok=True)
-    logger.info(f"Local runtime directories created under: {RUNTIME_BASE_DIR}")
+    logger.info(f"All runtime directories ensured under: {RUNTIME_BASE_DIR}")
 
 def cleanup_runtime_files():
     """
@@ -36,22 +36,23 @@ def cleanup_runtime_files():
     logger.info(f"Initiating cleanup of temporary runtime files under: {RUNTIME_BASE_DIR}")
     try:
         if os.path.exists(RUNTIME_BASE_DIR):
+            # Iterate and remove contents, then remove the base directory itself
             for item in os.listdir(RUNTIME_BASE_DIR):
                 item_path = os.path.join(RUNTIME_BASE_DIR, item)
                 if os.path.isdir(item_path):
-                    if item in [os.path.basename(VIDEO_DOWNLOADS_DIR), os.path.basename(AUDIO_DIR),
-                                os.path.basename(IMAGES_DIR), os.path.basename(TEMP_FILES_DIR),
-                                os.path.basename(OUTPUT_DIR), os.path.basename(LOGS_DIR)]:
-                        shutil.rmtree(item_path)
-                        logger.info(f"Cleaned up temporary directory: {item_path}")
+                    shutil.rmtree(item_path)
+                    logger.info(f"Cleaned up temporary directory: {item_path}")
                 else:
-                    if "temp" in item.lower() or "list" in item.lower():
-                        os.remove(item_path)
-                        logger.info(f"Cleaned up temporary file: {item_path}")
-            
-            if not os.listdir(RUNTIME_BASE_DIR):
+                    os.remove(item_path)
+                    logger.info(f"Cleaned up temporary file: {item_path}")
+
+            # After removing all contents, remove the base directory
+            if not os.listdir(RUNTIME_BASE_DIR): # Check if it's empty before removing
                 os.rmdir(RUNTIME_BASE_DIR)
                 logger.info(f"Removed empty base runtime directory: {RUNTIME_BASE_DIR}")
+            else:
+                logger.warning(f"Runtime base directory {RUNTIME_BASE_DIR} is not empty after cleanup attempt.")
+
 
         logger.info("Temporary file cleanup complete.")
     except Exception as e:

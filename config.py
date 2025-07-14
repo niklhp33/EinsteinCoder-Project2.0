@@ -33,25 +33,22 @@ GLOBAL_CONFIG = {
     },
 
     'api_keys': {
-        'google_api_key': _get_secret('GOOGLE_API_KEY', 'YOUR_GOOGLE_API_KEY_PLACEHOLDER'), 
+        'google_api_key': _get_secret('GOOGLE_API_KEY', 'YOUR_GOOGLE_API_KEY_PLACEHOLDER'),
         'pexels_api_key': _get_secret('PEXELS_API_KEY', 'YOUR_PEXELS_API_KEY_PLACEHOLDER'),
         'pixabay_api_key': _get_secret('PIXABAY_API_KEY', 'YOUR_PIXABAY_API_KEY_PLACEHOLDER'),
         'azure_speech_key': _get_secret('AZURE_SPEECH_KEY', 'YOUR_AZURE_SPEECH_KEY_PLACEHOLDER'),
         'azure_speech_region': _get_secret('AZURE_SPEECH_REGION', 'YOUR_AZURE_SPEECH_REGION_PLACEHOLDER'),
-        'openai_api_key': _get_secret('OPENAI_API_KEY', 'YOUR_OPENAI_API_KEY_PLACEHOLDER'),
         'stability_ai_api_key': _get_secret('STABILITY_AI_API_KEY', 'YOUR_STABILITY_AI_API_KEY_PLACEHOLDER'),
+        'openai_api_key': _get_secret('OPENAI_API_KEY', 'YOUR_OPENAI_API_KEY_PLACEHOLDER'),
     },
 
     'gcp': {
-        'service_account_key_path': '/content/drive/MyDrive/EinsteinCoderProject/service_account.json',
-        'gcs_bucket_name': 'nikzary-tiktok-juice-videos-2025', # <--- ENSURE THIS IS YOUR ACTUAL BUCKET NAME
+        'project_id': _get_secret('GCP_PROJECT_ID', 'your-gcp-project-id'),
+        'service_account_key_path': os.path.join(os.path.expanduser('~'), '.config', 'gcloud', 'application_default_credentials.json'), # Default path for Colab
+        'gcs_bucket_name': _get_secret('GCS_BUCKET_NAME', 'your-gcs-bucket-name'),
     },
 
     'video_settings': {
-        'default_aspect_ratio': 'Portrait 9:16 (TikTok/Reels)',
-        'default_max_clip_duration_s': 25,
-        'default_num_videos_to_source': 5,
-        'default_final_video_duration_s': 60,
         'default_video_source_type': 'Stock Footage (Pexels/Pixabay)',
         'default_concat_mode': 'Random Concatenation (Recommended)',
         'default_transition_mode': 'Fade',
@@ -87,9 +84,9 @@ GLOBAL_CONFIG = {
 
 def setup_runtime_directories():
     """Ensures local runtime directories as defined in GLOBAL_CONFIG exist."""
+    base_dir = GLOBAL_CONFIG['paths']['base_dir']
     for key, path in GLOBAL_CONFIG['paths'].items():
-        if key.endswith('_dir'):
-            full_path = os.path.join(GLOBAL_CONFIG['paths']['base_dir'], path)
+        if key.endswith('_dir'): # Only process directory paths
+            full_path = os.path.join(base_dir if key != 'base_dir' else '', path)
             os.makedirs(full_path, exist_ok=True)
-        elif key == 'base_dir':
-            os.makedirs(GLOBAL_CONFIG['paths']['base_dir'], exist_ok=True)
+            logging.getLogger(__name__).info(f"Ensured runtime directory: {full_path}")

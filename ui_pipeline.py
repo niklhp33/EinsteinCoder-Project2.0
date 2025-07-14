@@ -1,43 +1,22 @@
 import gradio as gr
-import os
-import sys
 import logging
+import os
+import shutil
 import time
-from datetime import datetime
-import json
 
-# Ensure absolute imports
 from config import GLOBAL_CONFIG
-from models import (
-    VideoParams, VideoLanguage, VideoAspect, VideoSourceType, VideoConcatMode,
-    VideoTransitionMode, SpeechSynthesisVoice, SubtitleFont, SubtitlePosition
-)
-from pipeline import VideoGenerationPipeline
+from models import VideoParams, VideoLanguage, VideoSourceType, VideoConcatMode, VideoTransitionMode, VideoAspect, SpeechSynthesisVoice, SubtitleFont, SubtitlePosition
+from pipeline import generate_video_pipeline # Import the main pipeline
 
-# --- Setup for logging and Project Root ---
-# This part is redundant as main execution cell already sets up logging and PROJECT_ROOT_DIR
-# However, keeping it for local testing capability if ui_pipeline.py is run directly.
+logger = logging.getLogger(__name__)
 
-# Determine PROJECT_ROOT_DIR for UI script context
-PROJECT_ROOT_DIR_UI = os.path.dirname(os.path.abspath(__file__)) # This should be /content/drive/MyDrive/project_2.0
-if not os.path.exists(os.path.join(PROJECT_ROOT_DIR_UI, 'config.py')):
-    if '/content/drive/MyDrive/project_2.0' in sys.path:
-        PROJECT_ROOT_DIR_UI = '/content/drive/MyDrive/project_2.0'
-    else:
-        PROJECT_ROOT_DIR_UI = '/project_2.0'
-        logging.getLogger(__name__).warning(f"UI Script: PROJECT_ROOT_DIR not found, using fallback: {PROJECT_ROOT_DIR_UI}")
-
-if PROJECT_ROOT_DIR_UI not in sys.path:
-    sys.path.append(PROJECT_ROOT_DIR_UI)
-
+# Ensure logging is configured before Gradio starts
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-logger = logging.getLogger(__name__)
-logger.info("UI Script: Imported all necessary modules. Setting up UI.")
+# --- Gradio Interface Functions ---
 
-# --- Define the Gradio UI function ---
-def generate_video_ui(
+def run_pipeline_ui(
     video_subject: str,
     video_language: str,
     video_source_type: str,
@@ -57,9 +36,12 @@ def generate_video_ui(
     subtitle_outline_color: str,
     subtitle_outline_width: int
 ):
-    start_time = time.time()
-    logger.info("--- Starting Video Generation Pipeline ---")
+    """
+    Wrapper function to run the video generation pipeline from Gradio UI.
+    """
+    logger.info("Gradio UI: Video generation started.")
     
+    # Map string inputs from Gradio to Enum types for VideoParams
     try:
         params = VideoParams(
             video_subject=video_subject,
@@ -81,189 +63,156 @@ def generate_video_ui(
             subtitle_outline_color=subtitle_outline_color,
             subtitle_outline_width=subtitle_outline_width
         )
-    except Exception as e:
-        logger.error(f"Error parsing UI parameters: {e}")
-        return "Video generation failed: Invalid UI parameters.", None, None
+    except ValueError as e:
+        logger.error(f"Gradio UI: Invalid input parameter: {e}")
+        return None, None, f"Error: Invalid input parameter: {e}. Please check your selections."
 
-    logger.info(f"UI submitted parameters: {json.dumps(params.dict(), indent=2)}")
-
-    output_video_path = None
-    pipeline_log_path = None
+    status_message = "Video generation in progress... Check logs for details."
     
-    log_filename = f"pipeline_log_FULL_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-    temp_log_filepath = os.path.join(GLOBAL_CONFIG['paths']['base_dir'], GLOBAL_CONFIG['paths']['logs_dir'], log_filename)
-    
-    pipeline_file_handler = None
-    try:
-        os.makedirs(os.path.dirname(temp_log_filepath), exist_ok=True)
-        pipeline_file_handler = logging.FileHandler(temp_log_filepath)
-        pipeline_file_handler.setLevel(logging.INFO)
-        pipeline_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        logging.getLogger().addHandler(pipeline_file_handler)
-        logger.info(f"Logging configured to console AND temporary file: {temp_log_filepath}")
+    # Call the main pipeline function
+    final_video_path, log_path = generate_video_pipeline(params)
 
-        pipeline_instance = VideoGenerationPipeline()
-        success = pipeline_instance.run(params=params)
+    if final_video_path and os.path.exists(final_video_path):
+        final_status = f"Video generation completed successfully! Output: {final_video_path}"
+        logger.info(final_status)
+        return final_video_path, log_path, final_status
+    else:
+        final_status = f"Video generation failed. Check log file for errors: {log_path}"
+        logger.error(final_status)
+        return None, log_path, final_status
 
-        if success:
-            status_message = "Video generation completed successfully! Check your Google Drive 'project_2.0/output' folder."
-            guessed_output_filename = f"final_video_{params.video_subject.replace(' ', '_')}_"
-            status_message += f"\n(Approximate filename: {guessed_output_filename}*.mp4)"
-            
-            log_filename_on_drive = os.path.basename(temp_log_filepath)
-            pipeline_log_path = os.path.join(
-                PROJECT_ROOT_DIR_UI, GLOBAL_CONFIG['paths']['logs_dir'], log_filename_on_drive
-            )
-            
-        else:
-            status_message = "Video generation failed! Check logs above for details."
+def launch_gradio_ui():
+    """Launches the Gradio user interface."""
+    logger.info("Launching Gradio UI...")
 
-    except Exception as e:
-        logger.critical(f"An unexpected error occurred during pipeline execution: {e}", exc_info=True)
-        status_message = f"An unexpected error occurred: {e}. Please check the console logs for more details."
-    finally:
-        if pipeline_file_handler:
-            pipeline_file_handler.flush()
-            pipeline_file_handler.close()
-            logging.getLogger().removeHandler(pipeline_file_handler)
-    
-    return status_message, None, pipeline_log_path
-
-
-logger.info("UI Script: User Interface elements defined.")
-
-with gr.Blocks() as demo:
-    gr.Markdown(
-        """
-        # 🎬 AI-Powered Video Generator 🚀
-        Generate engaging short videos based on your text prompts using AI models (Gemini, Pexels, Pixabay, Stability AI, Google TTS, Azure TTS).
-        ---
-        **Instructions:**
-        1.  Fill in the parameters below.
-        2.  Click 'Generate Video'.
-        3.  Wait for the process to complete (can take several minutes).
-        4.  The final video and detailed log will be saved to your Google Drive in `project_2.0/output` and `project_2.0/logs` respectively.
-        """
-    )
-    with gr.Row():
-        with gr.Column():
-            gr.Markdown("## Video Content & Style")
-            video_subject_input = gr.Textbox(
-                label="Video Subject/Topic (e.g., 'Benefits of daily exercise')",
-                value="Healthy lifestyle",
-                placeholder="Enter the main subject of your video..."
-            )
-            video_language_dropdown = gr.Dropdown(
-                label="Video Language",
-                choices=[lang.value for lang in VideoLanguage],
-                value=GLOBAL_CONFIG['video_settings']['default_video_language']
-            )
-            video_source_type_dropdown = gr.Dropdown(
-                label="Visual Asset Source",
-                choices=[src.value for src in VideoSourceType],
-                value=GLOBAL_CONFIG['video_settings']['default_video_source_type']
-            )
-            image_prompt_suffix_input = gr.Textbox(
-                label="Image/Video Prompt Suffix (for AI generation)",
-                placeholder="e.g., 'cinematic, 4k, hyperrealistic' (Optional)",
-                value=None, interactive=True
-            )
-            video_concat_mode_dropdown = gr.Dropdown(
-                label="Video Clip Concatenation Mode",
-                choices=[mode.value for mode in VideoConcatMode],
-                value=GLOBAL_CONFIG['video_settings']['default_concat_mode']
-            )
-            video_transition_mode_dropdown = gr.Dropdown(
-                label="Transition Style Between Clips",
-                choices=[mode.value for mode in VideoTransitionMode],
-                value=GLOBAL_CONFIG['video_settings']['default_transition_mode']
-            )
-            video_aspect_ratio_dropdown = gr.Dropdown(
-                label="Final Video Aspect Ratio",
-                choices=[aspect.value for aspect in VideoAspect],
-                value=GLOBAL_CONFIG['video_settings']['default_aspect_ratio']
-            )
-            max_clip_duration_slider = gr.Slider(
-                minimum=5, maximum=60, value=GLOBAL_CONFIG['video_settings']['default_max_clip_duration_s'],
-                label="Max Individual Clip Duration (seconds)", step=1
-            )
-            num_videos_slider = gr.Slider(
-                minimum=1, maximum=15, value=GLOBAL_CONFIG['video_settings']['default_num_videos_to_source'],
-                label="Number of Visual Assets to Source/Generate", step=1
-            )
-            final_video_duration_slider = gr.Slider(
-                minimum=15, maximum=180, value=GLOBAL_CONFIG['video_settings']['default_final_video_duration_s'],
-                label="Desired Final Video Duration (seconds)", step=5
-            )
-
-        with gr.Column():
-            gr.Markdown("## Audio & Subtitle Settings")
-            speech_synthesis_voice_dropdown = gr.Dropdown(
-                label="Narration Voice",
-                choices=[voice.value for voice in SpeechSynthesisVoice],
-                value=GLOBAL_CONFIG['audio_settings']['default_narration_voice']
-            )
-            enable_subtitles_checkbox = gr.Checkbox(
-                label="Enable Subtitles",
-                value=GLOBAL_CONFIG['subtitle_settings']['default_enable_subtitles']
-            )
-            subtitle_font_dropdown = gr.Dropdown(
-                label="Subtitle Font",
-                choices=[font.value for font in SubtitleFont],
-                value=GLOBAL_CONFIG['subtitle_settings']['default_font']
-            )
-            subtitle_position_dropdown = gr.Dropdown(
-                label="Subtitle Position",
-                choices=[pos.value for pos in SubtitlePosition],
-                value=GLOBAL_CONFIG['subtitle_settings']['default_position']
-            )
-            subtitle_font_size_slider = gr.Slider(
-                minimum=20, maximum=100, value=GLOBAL_CONFIG['subtitle_settings']['default_font_size'],
-                label="Subtitle Font Size", step=1
-            )
-            subtitle_color_input = gr.ColorPicker(
-                label="Subtitle Color",
-                value=GLOBAL_CONFIG['subtitle_settings']['default_color']
-            )
-            subtitle_outline_color_input = gr.ColorPicker(
-                label="Subtitle Outline Color",
-                value=GLOBAL_CONFIG['subtitle_settings']['default_outline_color']
-            )
-            subtitle_outline_width_slider = gr.Slider(
-                minimum=0, maximum=10, value=GLOBAL_CONFIG['subtitle_settings']['default_outline_width'],
-                label="Subtitle Outline Width", step=1
-            )
-
-    generate_button = gr.Button("Generate Video", variant="primary")
-    
-    status_output = gr.Textbox(label="Status / Log", lines=5)
-    video_output = gr.Video(label="Generated Video (check Drive for final file)", interactive=False)
-    download_log_link = gr.File(label="Download Full Log (from Drive)", interactive=False)
-
-    generate_button.click(
-        fn=generate_video_ui,
-        inputs=[
-            video_subject_input,
-            video_language_dropdown,
-            video_source_type_dropdown,
-            image_prompt_suffix_input,
-            video_concat_mode_dropdown,
-            video_transition_mode_dropdown,
-            video_aspect_ratio_dropdown,
-            max_clip_duration_slider,
-            num_videos_slider,
-            final_video_duration_slider,
-            speech_synthesis_voice_dropdown,
-            enable_subtitles_checkbox,
-            subtitle_font_dropdown,
-            subtitle_position_dropdown,
-            subtitle_font_size_slider,
-            subtitle_color_input,
-            subtitle_outline_color_input,
-            subtitle_outline_width_slider
-        ],
-        outputs=[status_output, video_output, download_log_link]
+    # Determine default values from GLOBAL_CONFIG
+    default_video_params = VideoParams(
+        video_subject="default subject", # This will be overridden by UI input
+        video_source_type=VideoSourceType(GLOBAL_CONFIG['video_settings']['default_video_source_type']),
+        video_concat_mode=VideoConcatMode(GLOBAL_CONFIG['video_settings']['default_concat_mode']),
+        video_transition_mode=VideoTransitionMode(GLOBAL_CONFIG['video_settings']['default_transition_mode']),
+        video_language=VideoLanguage(GLOBAL_CONFIG['video_settings']['default_video_language']),
+        speech_synthesis_voice=SpeechSynthesisVoice(GLOBAL_CONFIG['audio_settings']['default_narration_voice']),
+        enable_subtitles=GLOBAL_CONFIG['subtitle_settings']['default_enable_subtitles'],
+        subtitle_font=SubtitleFont(GLOBAL_CONFIG['subtitle_settings']['default_font']),
+        subtitle_position=SubtitlePosition(GLOBAL_CONFIG['subtitle_settings']['default_position']),
+        subtitle_font_size=GLOBAL_CONFIG['subtitle_settings']['default_font_size'],
+        subtitle_color=GLOBAL_CONFIG['subtitle_settings']['default_color'],
+        subtitle_outline_color=GLOBAL_CONFIG['subtitle_settings']['default_outline_color'],
+        subtitle_outline_width=GLOBAL_CONFIG['subtitle_settings']['default_outline_width']
     )
 
-logger.info("UI Script: User Interface displayed. Waiting for input.")
-demo.launch(debug=True, share=True)
+    with gr.Blocks(theme=gr.themes.Soft()) as demo:
+        gr.Markdown("# 🎬 Einstein Coder - Automated Short-Form Video Generation")
+        gr.Markdown("Enter your video subject and customize settings to generate a short video.")
+
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("### 📝 Script & Voice Settings")
+                video_subject = gr.Textbox(label="Video Subject/Topic", placeholder="e.g., 'Benefits of AI in daily life'", interactive=True)
+                video_language = gr.Dropdown(
+                    label="Video Language",
+                    choices=[e.value for e in VideoLanguage],
+                    value=default_video_params.video_language.value,
+                    interactive=True
+                )
+                speech_synthesis_voice = gr.Dropdown(
+                    label="Narration Voice",
+                    choices=[e.value for e in SpeechSynthesisVoice],
+                    value=default_video_params.speech_synthesis_voice.value,
+                    interactive=True
+                )
+            with gr.Column():
+                gr.Markdown("### 🎥 Video Source & Editing")
+                video_source_type = gr.Dropdown(
+                    label="Video Source Type",
+                    choices=[e.value for e in VideoSourceType],
+                    value=default_video_params.video_source_type.value,
+                    interactive=True
+                )
+                image_prompt_suffix = gr.Textbox(
+                    label="AI Image Prompt Suffix (if AI Images selected)",
+                    placeholder="e.g., 'futuristic, hyperrealistic'",
+                    lines=1,
+                    interactive=True
+                )
+                video_aspect_ratio = gr.Radio(
+                    label="Video Aspect Ratio",
+                    choices=[e.value for e in VideoAspect],
+                    value=default_video_params.video_aspect_ratio.value,
+                    interactive=True
+                )
+                video_concat_mode = gr.Dropdown(
+                    label="Video Concatenation Mode",
+                    choices=[e.value for e in VideoConcatMode],
+                    value=default_video_params.video_concat_mode.value,
+                    interactive=True
+                )
+                video_transition_mode = gr.Dropdown(
+                    label="Video Transition Mode",
+                    choices=[e.value for e in VideoTransitionMode],
+                    value=default_video_params.video_transition_mode.value,
+                    interactive=True
+                )
+                max_clip_duration_s = gr.Slider(minimum=5, maximum=30, value=default_video_params.max_clip_duration_s, step=1, label="Max Individual Clip Duration (s)")
+                num_videos_to_source_or_generate = gr.Slider(minimum=3, maximum=15, value=default_video_params.num_videos_to_source_or_generate, step=1, label="Number of Clips to Source/Generate")
+                final_video_duration_s = gr.Slider(minimum=15, maximum=120, value=default_video_params.final_video_duration_s, step=5, label="Target Final Video Duration (s)")
+
+            with gr.Column():
+                gr.Markdown("### 📝 Subtitle Settings")
+                enable_subtitles = gr.Checkbox(label="Enable Subtitles", value=default_video_params.enable_subtitles, interactive=True)
+                subtitle_font = gr.Dropdown(
+                    label="Font",
+                    choices=[e.value for e in SubtitleFont],
+                    value=default_video_params.subtitle_font.value,
+                    interactive=True
+                )
+                subtitle_position = gr.Dropdown(
+                    label="Position",
+                    choices=[e.value for e in SubtitlePosition],
+                    value=default_video_params.subtitle_position.value,
+                    interactive=True
+                )
+                subtitle_font_size = gr.Slider(minimum=20, maximum=100, value=default_video_params.subtitle_font_size, step=1, label="Font Size")
+                subtitle_color = gr.ColorPicker(label="Font Color", value=default_video_params.subtitle_color, interactive=True)
+                subtitle_outline_color = gr.ColorPicker(label="Outline Color", value=default_video_params.subtitle_outline_color, interactive=True)
+                subtitle_outline_width = gr.Slider(minimum=0, maximum=10, value=default_video_params.subtitle_outline_width, step=1, label="Outline Width")
+        
+        generate_btn = gr.Button("🚀 Generate Video", variant="primary")
+
+        with gr.Row():
+            video_output = gr.Video(label="Generated Video", interactive=False)
+        with gr.Row():
+            log_output = gr.File(label="Log File", interactive=False)
+        with gr.Row():
+            status_text = gr.Textbox(label="Status", interactive=False, lines=2)
+
+        generate_btn.click(
+            fn=run_pipeline_ui,
+            inputs=[
+                video_subject,
+                video_language,
+                video_source_type,
+                image_prompt_suffix,
+                video_concat_mode,
+                video_transition_mode,
+                video_aspect_ratio,
+                max_clip_duration_s,
+                num_videos_to_source_or_generate,
+                final_video_duration_s,
+                speech_synthesis_voice,
+                enable_subtitles,
+                subtitle_font,
+                subtitle_position,
+                subtitle_font_size,
+                subtitle_color,
+                subtitle_outline_color,
+                subtitle_outline_width
+            ],
+            outputs=[video_output, log_output, status_text]
+        )
+    
+    demo.launch(debug=True, share=True)
+
+if __name__ == "__main__":
+    launch_gradio_ui()
