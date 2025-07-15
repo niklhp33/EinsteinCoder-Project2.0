@@ -1,13 +1,14 @@
 import logging
 import os
 import time
-from typing import Optional, List
+import shutil
+from typing import Optional, List, Tuple
 
 # Local imports
 from config import GLOBAL_CONFIG
 from models import VideoParams, SubtitleEntry, SubtitleFont, SubtitlePosition, VideoAspect
 from utils.cleanup import cleanup_runtime_files, setup_runtime_directories
-from utils.gcs_utils import upload_to_gcs
+from utils.gcs_utils import upload_to_gcs # Conceptual GCS upload, main output goes to Drive mount
 from utils.video_utils import get_video_duration # For general video duration
 from utils.audio_utils import combine_audio_tracks, download_background_music, get_audio_duration_ffprobe
 from ai_integration.gemini_integration import generate_script_with_gemini
@@ -63,6 +64,8 @@ def generate_video_pipeline(params: VideoParams) -> Tuple[Optional[str], Optiona
             text=script_text,
             audio_output_dir=AUDIO_DIR,
             voice_type=params.speech_synthesis_voice
+            # Add new_features.advanced_tts_controls parameters here once fully integrated
+            # e.g., emotional_tone="cheerful", speech_rate_percent=110
         )
         if not narration_audio_path:
             logger.error("Narration synthesis failed. Aborting pipeline.")

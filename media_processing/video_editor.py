@@ -1,11 +1,14 @@
 import os
 import logging
 import random
+import shlex
+import shutil
+import time
 from typing import List, Optional, Tuple, Any
 
-from utils.ffmpeg_utils import concatenate_videos, add_audio_to_video, add_subtitles_to_video
+from utils.ffmpeg_utils import concatenate_videos, add_audio_to_video, add_subtitles_to_video, escape_ffmpeg_text # Import escape_ffmpeg_text
 from utils.video_utils import get_video_duration, search_pexels_videos, search_pixabay_videos, download_video_clip
-from ai_integration.image_video_generation import generate_image_with_imagen, generate_video_with_ttv_api
+from ai_integration.image_video_generation import generate_image_with_imagen, generate_video_with_ttv_api, combine_ai_visuals_with_stock_footage # Import combine_ai_visuals_with_stock_footage
 from config import GLOBAL_CONFIG
 from models import VideoTransitionMode, VideoSourceType, VideoAspect, VideoConcatMode, SubtitleEntry, SubtitleFont, SubtitlePosition
 
@@ -24,26 +27,13 @@ def generate_subtitles_file(
     """
     Generates an ASS (Advanced SubStation Alpha) subtitle file from a list of subtitle entries.
     Includes styling information for FFmpeg to burn in.
+    Uses escape_ffmpeg_text for any dynamic text in ASS, though ASS has its own escaping rules.
     """
     logger.info(f"Generating ASS subtitle file: {output_filepath}")
 
-    # Map color names to hex (e.g., 'white' -> '&HFFFFFF&', 'black' -> '&H000000&')
-    # ASS colors are BGRA, so ABGR hex. FFmpeg expects ARGB or RGBA typically.
-    # We'll use basic HTML-style color names and hope FFmpeg's ASS parser handles them,
-    # or rely on direct hex:
-    # ASS colors are usually BGR hex like &HBBGGRR&. Let's use standard hex like RRGGBB.
-    # And convert to ASS format if needed (usually done by client, or just use name)
-
-    # Simplified color mapping for ASS PrimaryColour (ARGB, but in reverse order for ASS: BBGGRR)
-    # FFmpeg subtitles filter generally handles common color names.
-    # For precise hex, we would map "white" to 0xFFFFFF and then reorder to ASS &HBBGGRR
-    # e.g., white is &HFFFFFF, black is &H000000
-
-    # For now, let's keep it simple with common color names for the ASS file.
-    # ASS file format directly specifies font path for custom fonts.
-    # We will assume a common font path like /usr/share/fonts/truetype/dejavu if font_path not found.
-    # For custom fonts, the user needs to provide a direct path or ensure it's installed.
-
+    # For colors in ASS, format is typically &HBBGGRR& for ARGB where A is ignored by many players
+    # Or common names like "white". Let's stick to common names as passed from UI for simplicity.
+    
     ass_content = f"""[Script Info]
 ScriptType: v4.00+
 Collisions: Normal
@@ -57,8 +47,11 @@ Style: Default,{font.value},{font_size},{color},{color},{outline_color},{outline
     for entry in subtitle_entries:
         start_time = time.strftime('%H:%M:%S', time.gmtime(entry.start_time_s)) + f".{int((entry.start_time_s % 1) * 100):02d}"
         end_time = time.strftime('%H:%M:%S', time.gmtime(entry.end_time_s)) + f".{int((entry.end_time_s % 1) * 100):02d}"
-        # ASS dialogue line: Dialogue: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{entry.text}\n"
+        # Escape text for safety, though ASS parser usually handles basic text.
+        # More advanced animation would involve specific ASS tags which should NOT be escaped by escape_ffmpeg_text.
+        # For simplicity, we apply it here to the plain text.
+        safe_text = escape_ffmpeg_text(entry.text)
+        ass_content += f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{safe_text}\n"
 
     try:
         with open(output_filepath, 'w', encoding='utf-8') as f:
@@ -72,6 +65,7 @@ Style: Default,{font.value},{font_size},{color},{color},{outline_color},{outline
 def download_source_clips(video_params: Any, video_downloads_dir: str, max_clip_duration_s: int) -> List[str]:
     """
     Downloads video clips based on the selected source type.
+    Includes conceptual calls to AI image/video generation and their combination.
     """
     downloaded_clip_paths = []
     
@@ -79,11 +73,11 @@ def download_source_clips(video_params: Any, video_downloads_dir: str, max_clip_
     target_width = 1080 # Default for TikTok/Reels portrait
     target_height = 1920
 
-    if video_params.video_source_type == VideoSourceType.PORTRAIT_9_16:
+    if video_params.video_aspect_ratio == VideoAspect.PORTRAIT_9_16:
         target_width, target_height = 1080, 1920
-    elif video_params.video_source_type == VideoSourceType.LANDSCAPE_16_9:
+    elif video_params.video_aspect_ratio == VideoAspect.LANDSCAPE_16_9:
         target_width, target_height = 1920, 1080
-    elif video_params.video_source_type == VideoSourceType.SQUARE_1_1:
+    elif video_params.video_aspect_ratio == VideoAspect.SQUARE_1_1:
         target_width, target_height = 1080, 1080
         
     os.makedirs(video_downloads_dir, exist_ok=True)
@@ -165,7 +159,7 @@ def download_source_clips(video_params: Any, video_downloads_dir: str, max_clip_
                     'ffmpeg', '-y',
                     '-loop', '1',
                     '-i', shlex.quote(image_path),
-                    '-t', str(video_params.max_clip_duration_s), # Duration of image clip
+                    '-t', str(max_clip_duration_s), # Duration of image clip
                     '-vf', f"scale={target_width}:{target_height}:force_original_aspect_ratio=increase,crop={target_width}:{target_height},setsar=1",
                     '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p',
                     shlex.quote(image_video_path)
@@ -183,11 +177,21 @@ def download_source_clips(video_params: Any, video_downloads_dir: str, max_clip_
             # Assuming TTV API can generate clips of a certain duration
             video_path = generate_video_with_ttv_api(
                 script_segment=prompt,
-                duration_seconds=video_params.max_clip_duration_s,
+                duration_seconds=max_clip_duration_s,
                 video_style="cinematic" # Could be configurable
             )
             if video_path:
                 downloaded_clip_paths.append(video_path)
+
+    # Conceptual step: if AI images/videos are combined with stock footage
+    # This would involve an extra step in the pipeline after initial sourcing.
+    if downloaded_clips and video_params.video_source_type == VideoSourceType.STOCK_FOOTAGE_PEXELS_PIXABAY:
+        # This is highly conceptual, as the choice between AI vs Stock is exclusive in UI params
+        # But if a future feature allows mixing:
+        # Example: if some clips are stock and some are AI, combine them.
+        # combined_output = combine_ai_visuals_with_stock_footage(downloaded_clips[0], downloaded_clips[1:], "mixed_footage_output.mp4")
+        pass
+
 
     logger.info(f"Finished sourcing/generating clips. Total clips: {len(downloaded_clip_paths)}")
     return downloaded_clip_paths

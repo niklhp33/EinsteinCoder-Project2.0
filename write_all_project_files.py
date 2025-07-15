@@ -151,6 +151,7 @@ def write_all_files(project_root_dir: str):
         EN_US_NANCY_MULTILINGUAL = "en-US-NancyMultilingualNeural (Azure)"
         GTTS_DEFAULT = "gTTS (Basic)"
 
+
     class SubtitleFont(str, Enum):
         ROBOTO = "Roboto"
         ARIAL = "Arial"
@@ -240,7 +241,7 @@ def write_all_files(project_root_dir: str):
     from models import VideoParams, SubtitleEntry, SubtitleFont, SubtitlePosition, VideoAspect
     from utils.cleanup import cleanup_runtime_files, setup_runtime_directories
     from utils.gcs_utils import upload_to_gcs # Conceptual GCS upload, main output goes to Drive mount
-    from utils.video_utils import get_video_duration
+    from utils.video_utils import get_video_duration # For general video duration
     from utils.audio_utils import combine_audio_tracks, download_background_music, get_audio_duration_ffprobe
     from ai_integration.gemini_integration import generate_script_with_gemini
     from ai_integration.speech_synthesis import synthesize_narration
@@ -266,6 +267,7 @@ def write_all_files(project_root_dir: str):
         file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s'))
         logging.getLogger().addHandler(file_handler)
         logger.info(f"Pipeline log file: {log_file_path}")
+
 
         final_video_output_path = None
         try:
@@ -296,7 +298,9 @@ def write_all_files(project_root_dir: str):
                 target_video_duration = 60
             else:
                 target_video_duration = narration_duration
+            
             params.final_video_duration_s = int(target_video_duration)
+
 
             logger.info(f"Sourcing/generating video clips ({params.video_source_type})...")
             downloaded_clips = download_source_clips(
@@ -443,7 +447,7 @@ def write_all_files(project_root_dir: str):
         finally:
             logger.info("Cleaning up runtime files...")
             cleanup_runtime_files()
-            if file_handler in logging.getLogger().handlers: # Check if handler still exists
+            if file_handler in logging.getLogger().handlers:
                 logging.getLogger().removeHandler(file_handler)
     """)
 
@@ -904,12 +908,12 @@ def write_all_files(project_root_dir: str):
     import os
     import shlex
     import math
-    import random # Added for shuffle
+    import random
     from typing import List, Tuple, Optional, Any
     import shutil
 
     from utils.shell_utils import run_shell_command
-    from utils.video_utils import get_video_duration # Assuming get_video_duration is in video_utils
+    from utils.video_utils import get_video_duration
 
     logger = logging.getLogger(__name__)
 
@@ -1146,10 +1150,10 @@ def write_all_files(project_root_dir: str):
         return True
 
     def escape_ffmpeg_text(text: str) -> str:
-        text = text.replace('\\\\', '\\\\\\\\') # Escape existing backslashes first
+        text = text.replace('\\\\', '\\\\\\\\')
         text = text.replace("'", "\\'")
         text = text.replace(':', '\\:')
-        text = text.replace('\n', '\\n')
+        text = text.replace('\\n', '\\\\n') # Re-escaped for inner string context
         return text
     """)
 
@@ -1228,7 +1232,7 @@ def write_all_files(project_root_dir: str):
         os.makedirs(output_dir, exist_ok=True)
         output_filepath = os.path.join(output_dir, f"background_music_{uuid.uuid4().hex}.mp3")
 
-        dummy_mp3_content = b'\\xff\\xfb\\x30\\x04' + b'\\x00' * 128 # Minimal valid MP3 header + some bytes
+        dummy_mp3_content = b'\\xff\\xfb\\x30\\x04' + b'\\x00' * 128
         try:
             with open(output_filepath, 'wb') as f:
                 f.write(dummy_mp3_content)
@@ -1477,7 +1481,7 @@ def write_all_files(project_root_dir: str):
     image_video_generation_py_content = textwrap.dedent("""\
     import logging
     import os
-    import shutil # Added for dummy file creation
+    import shutil
 
     logger = logging.getLogger(__name__)
 
@@ -1489,7 +1493,6 @@ def write_all_files(project_root_dir: str):
         os.makedirs(temp_dir, exist_ok=True)
         placeholder_image_path = os.path.join(temp_dir, placeholder_image_name)
         
-        # Create a dummy file to simulate existence
         with open(placeholder_image_path, 'w') as f:
             f.write("DUMMY IMAGE CONTENT")
 
@@ -1504,7 +1507,6 @@ def write_all_files(project_root_dir: str):
         os.makedirs(temp_dir, exist_ok=True)
         placeholder_video_path = os.path.join(temp_dir, placeholder_video_name)
 
-        # Create a dummy file to simulate existence
         with open(placeholder_video_path, 'w') as f:
             f.write("DUMMY VIDEO CONTENT")
 
@@ -1515,7 +1517,6 @@ def write_all_files(project_root_dir: str):
         logger.info(f"Simulating combination of AI visual '{ai_visual_path}' with {len(stock_footage_paths)} stock clips into '{output_path}'")
         
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        # Create a dummy file to simulate existence
         with open(output_path, 'w') as f:
             f.write("DUMMY COMBINED VIDEO CONTENT")
             
@@ -1528,8 +1529,10 @@ def write_all_files(project_root_dir: str):
     import os
     import logging
     import random
-    import shlex # Added for shlex.quote
-    import shutil # Added for shutil.copyfile if needed
+    import shlex
+    import shutil
+    import time # Import time for gmtime
+
     from typing import List, Optional, Tuple, Any
 
     from utils.ffmpeg_utils import concatenate_videos, add_audio_to_video, add_subtitles_to_video
@@ -1657,7 +1660,7 @@ def write_all_files(project_root_dir: str):
                 if image_path:
                     image_video_path = os.path.join(video_downloads_dir, f"ai_image_clip_{i}.mp4")
                     
-                    from utils.shell_utils import run_shell_command # Import here to avoid circular dependency
+                    from utils.shell_utils import run_shell_command
                     cmd = [
                         'ffmpeg', '-y',
                         '-loop', '1',
@@ -1744,6 +1747,7 @@ def write_all_files(project_root_dir: str):
     # new_features/advanced_tts_controls.py content
     advanced_tts_controls_py_content = textwrap.dedent("""\
     import logging
+    import os # Added for os.makedirs
     from typing import Optional, Dict, Any
 
     logger = logging.getLogger(__name__)
@@ -1859,8 +1863,8 @@ def write_all_files(project_root_dir: str):
     from typing import List, Optional, Dict, Any
 
     from utils.shell_utils import run_shell_command
-    from utils.video_utils import get_video_duration # Re-import for get_video_duration
-    from utils.ffmpeg_utils import escape_ffmpeg_text # Re-import for text escaping
+    from utils.video_utils import get_video_duration
+    from utils.ffmpeg_utils import escape_ffmpeg_text
 
     logger = logging.getLogger(__name__)
 
@@ -1935,7 +1939,7 @@ def write_all_files(project_root_dir: str):
             '-i', shlex.quote(video_path),
             '-vf', drawtext_filter,
             '-c:a', 'copy',
-            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv42020p',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23', '-pix_fmt', 'yuv420p', # Changed pix_fmt to yuv420p
             shlex.quote(output_path)
         ]
         stdout, stderr, returncode = run_shell_command(cmd, check_error=False, timeout=120)
@@ -2017,12 +2021,12 @@ def write_all_files(project_root_dir: str):
     import logging
     import os
     import shutil
-    import random # Added for consistency in imports
+    import random
     from typing import Optional, List
 
-    from utils.shell_utils import run_shell_command # Re-import for dummy video creation
-    from utils.video_utils import get_video_duration, get_video_resolution # Re-import for video properties
-    from utils.ffmpeg_utils import concatenate_videos # Re-import for video concatenation
+    from utils.shell_utils import run_shell_command
+    from utils.video_utils import get_video_duration, get_video_resolution
+    from utils.ffmpeg_utils import concatenate_videos
 
     logger = logging.getLogger(__name__)
 
@@ -2032,7 +2036,7 @@ def write_all_files(project_root_dir: str):
 
     def _create_dummy_template_files():
         os.makedirs(_DUMMY_TEMPLATE_DIR, exist_ok=True)
-
+        # Check if files exist before creating to prevent permission issues or unnecessary ops
         if not os.path.exists(_DUMMY_INTRO_VIDEO):
             logger.info(f"Creating dummy intro video: {_DUMMY_INTRO_VIDEO}")
             cmd_intro = ['ffmpeg', '-y', '-f', 'lavfi', '-i', 'color=c=blue:s=1280x720:d=3,format=yuv420p', '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', _DUMMY_INTRO_VIDEO]
@@ -2133,7 +2137,7 @@ def write_all_files(project_root_dir: str):
     import shutil
     from typing import List, Dict, Any, Optional, Union
 
-    from utils.video_utils import get_video_duration # Re-import for video duration
+    from utils.video_utils import get_video_duration
 
     logger = logging.getLogger(__name__)
 
@@ -2358,7 +2362,7 @@ def write_all_files(project_root_dir: str):
 
     def search_music_by_mood_genre(mood: str, genre: str, duration_s: int) -> List[str]:
         logger.info(f"Searching music library for mood '{mood}', genre '{genre}', duration {duration_s}s...")
-        _create_dummy_music_files() # Ensure dummy files exist
+        _create_dummy_music_files()
         
         available_music = []
         if "upbeat" in mood.lower() and "cinematic" in genre.lower():
@@ -2373,19 +2377,14 @@ def write_all_files(project_root_dir: str):
 
     def analyze_audio_for_beats(audio_path: str) -> List[float]:
         logger.info(f"Analyzing {audio_path} for beat detection...")
-        # TODO: Integrate with audio analysis libraries like Librosa or Aubio
-        # This would involve loading the audio, performing beat tracking, and returning timestamps.
         
-        # Placeholder: return dummy beat times
-        duration = 30.0 # Assume dummy duration
-        beat_times = [i * 0.75 for i in range(int(duration / 0.75))] # Every 0.75 seconds
+        duration = 30.0
+        beat_times = [i * 0.75 for i in range(int(duration / 0.75))]
         logger.info(f"Simulated beat detection returned {len(beat_times)} beats.")
         return beat_times
 
     def integrate_music_with_video_sync(video_path: str, music_path: str, beat_times: List[float], output_path: str) -> Optional[str]:
         logger.info(f"Integrating music {music_path} with video {video_path} using beat sync...")
-        # TODO: Implement complex FFmpeg filtergraphs or moviepy logic to synchronize video cuts
-        # or visual effects with detected beat times.
         
         if not os.path.exists(video_path):
             logger.error(f"Video file not found for music integration: {video_path}")
@@ -2395,13 +2394,13 @@ def write_all_files(project_root_dir: str):
             return None
             
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        shutil.copy(video_path, output_path) # Simple copy for placeholder
+        shutil.copy(video_path, output_path)
         logger.info(f"Simulated music integration complete. Output: {output_path}")
         return output_path
     """)
 
     # new_features/list_project_files.py content
-    list_project_files_py_content = textwrap.dedent("""\
+    list_project_files_py_content = textwrap.dedent("""\\
     import os
     import logging
     import datetime
@@ -2410,85 +2409,6 @@ def write_all_files(project_root_dir: str):
 
     def update_project_file_list(project_root_dir: str):
         project_files_expected = [
-            "config.py",
-            "models.py",
-            "pipeline.py",
-            "ui_pipeline.py",
-            os.path.join("utils", "__init__.py"),
-            os.path.join("utils", "shell_utils.py"),
-            os.path.join("utils", "gcs_utils.py"),
-            os.path.join("utils", "cleanup.py"),
-            os.path.join("utils", "ffmpeg_utils.py"),
-            os.path.join("utils", "audio_utils.py"), # New file
-            os.path.join("utils", "video_utils.py"),
-            os.path.join("ai_integration", "__init__.py"),
-            os.path.join("ai_integration", "gemini_integration.py"),
-            os.path.join("ai_integration", "speech_synthesis.py"),
-            os.path.join("ai_integration", "image_video_generation.py"),
-            os.path.join("media_processing", "__init__.py"),
-            os.path.join("media_processing", "video_editor.py"),
-            os.path.join("new_features", "__init__.py"),
-            os.path.join("new_features", "project_roadmap.py"),
-            os.path.join("new_features", "advanced_tts_controls.py"),
-            os.path.join("new_features", "cost_analyzer.py"),
-            os.path.join("new_features", "dynamic_visual_cues.py"), # New file
-            os.path.join("new_features", "interactive_content_generation.py"),
-            os.path.join("new_features", "intro_outro_templates.py"),
-            os.path.join("new_features", "long_form_adaptation.py"),
-            os.path.join("new_features", "niche_content_specialization.py"),
-            os.path.join("new_features", "integrated_music_library.py"), # New file
-            os.path.join("new_features", "multilingual_support.py"),
-            os.path.join("new_features", "feature_integration_pipeline.py"), # The 5000 features framework
-            "write_all_project_files.py" # The script that contains all other files
-        ]
-
-        output_lines = []
-        output_lines.append("--- Einstein Coder Project Files List ---\\n")
-        output_lines.append("Generated on: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\\n")
-        output_lines.append("Relative paths from project_2.0 folder, with existence check:\\n\\n")
-
-        docs_dir = os.path.join(project_root_dir, 'docs')
-        os.makedirs(docs_dir, exist_ok=True)
-        
-        output_filename = os.path.join(docs_dir, "project_files_list.txt")
-        
-        for i, file_path_rel in enumerate(project_files_expected):
-            full_path_on_drive = os.path.join(project_root_dir, file_path_rel)
-            status = " (Exists)" if os.path.exists(full_path_on_drive) else " (MISSING!)"
-            output_lines.append(f"{i+1:02d}. {file_path_rel}{status}\\n")
-        
-        output_lines.append("\\n--- END OF LIST ---")
-
-        try:
-            with open(output_filename, 'w', encoding='utf-8') as f:
-                f.writelines(output_lines)
-            logger.info(f"Project file list generated and saved to Google Drive: {output_filename}")
-        except Exception as e:
-            logger.error(f"Failed to write project file list to Drive: {e}", exc_info=True)
-
-    if __name__ == "__main__":
-        if 'PROJECT_ROOT_DIR' in globals():
-            update_project_file_list(PROJECT_ROOT_DIR)
-        else:
-            logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-            logger.warning("PROJECT_ROOT_DIR not found. Attempting with current directory (may not be correct in Colab).")
-            update_project_file_list(os.getcwd())
-    """)
-
-    # new_features/list_writefiles.py content (This file might become less relevant with write_all_project_files.py)
-    list_writefiles_py_content = textwrap.dedent("""\
-    import os
-    import logging
-
-    logger = logging.getLogger(__name__)
-
-    def generate_writefile_commands(project_root_dir: str) -> str:
-        """
-        Generates a string containing %%writefile commands for all .py files
-        in the project_2.0 structure. This is mostly for reference/troubleshooting
-        since `write_all_project_files.py` now handles batch updates.
-        """
-        project_files_to_write = [
             "config.py",
             "models.py",
             "pipeline.py",
@@ -2517,13 +2437,94 @@ def write_all_files(project_root_dir: str):
             os.path.join("new_features", "niche_content_specialization.py"),
             os.path.join("new_features", "integrated_music_library.py"),
             os.path.join("new_features", "multilingual_support.py"),
-            os.path.join("new_features", "feature_integration_pipeline.py")
+            os.path.join("new_features", "feature_integration_pipeline.py"),
+            "write_all_project_files.py"
+        ]
+
+        output_lines = []
+        output_lines.append("--- Einstein Coder Project Files List ---\\n")
+        output_lines.append("Generated on: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\\n")
+        output_lines.append("Relative paths from project_2.0 folder, with existence check:\\n\\n")
+
+        docs_dir = os.path.join(project_root_dir, 'docs')
+        os.makedirs(docs_dir, exist_ok=True)
+        
+        output_filename = os.path.join(docs_dir, "project_files_list.txt")
+        
+        for i, file_path_rel in enumerate(project_files_expected):
+            full_path_on_drive = os.path.join(project_root_dir, file_path_rel)
+            status = " (Exists)" if os.path.exists(full_path_on_drive) else " (MISSING!)"
+            output_lines.append(f"{i+1:02d}. {file_path_rel}{status}\\n")
+        
+        output_lines.append("\\n--- END OF LIST ---")
+
+        try:
+            with open(output_filename, 'w', encoding='utf-8') as f:
+                f.writelines(output_lines)
+            logger.info(f"Project file list generated and saved to Google Drive: {output_filename}")
+        except Exception as e:
+            logger.error(f"Failed to write project file list to Drive: {e}", exc_info=True)
+
+    if __name__ == "__main__":
+        if 'PROJECT_ROOT_DIR' in globals():
+            update_project_file_list(globals()['PROJECT_ROOT_DIR']) # Corrected call for global PROJECT_ROOT_DIR
+        else:
+            logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+            logger.warning("PROJECT_ROOT_DIR not found. Attempting with current directory (may not be correct in Colab).")
+            update_project_file_list(os.getcwd())
+    """)
+
+    # new_features/list_writefiles.py content
+    list_writefiles_py_content = textwrap.dedent("""\\
+    import os
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    def generate_writefile_commands(project_root_dir: str) -> str:
+        \"\"\"
+        Generates a string containing %%writefile commands for all .py files
+        in the project_2.0 structure. This is mostly for reference/troubleshooting
+        since `write_all_project_files.py` now handles batch updates.
+        \"\"\"
+        project_files_to_write = [
+            "config.py",
+            "models.py",
+            "pipeline.py",
+            "ui_pipeline.py",
+            "utils/__init__.py",
+            "utils/shell_utils.py",
+            "utils/gcs_utils.py",
+            "utils/cleanup.py",
+            "utils/ffmpeg_utils.py",
+            "utils/audio_utils.py",
+            "utils/video_utils.py",
+            "ai_integration/__init__.py",
+            "ai_integration/gemini_integration.py",
+            "ai_integration/speech_synthesis.py",
+            "ai_integration/image_video_generation.py",
+            "media_processing/__init__.py",
+            "media_processing/video_editor.py",
+            "new_features/__init__.py",
+            "new_features/project_roadmap.py",
+            "new_features/advanced_tts_controls.py",
+            "new_features/cost_analyzer.py",
+            "new_features/dynamic_visual_cues.py",
+            "new_features/interactive_content_generation.py",
+            "new_features/intro_outro_templates.py",
+            "new_features/long_form_adaptation.py",
+            "new_features/niche_content_specialization.py",
+            "new_features/integrated_music_library.py",
+            "new_features/multilingual_support.py",
+            "new_features/feature_integration_pipeline.py"
         ]
 
         commands = ["# --- GENERATED %%writefile COMMANDS ---\\n"]
         for file_path_rel in project_files_to_write:
             full_path = os.path.join(project_root_dir, file_path_rel)
-            commands.append(f"%%writefile {full_path}\\n# Content for {file_path_rel}\\n# ... (actual content would follow)\\n\\n")
+            # Ensure forward slashes for Colab's %%writefile magic
+            full_path_for_writefile = full_path.replace('\\\\', '/') 
+            commands.append(f"%%writefile {full_path_for_writefile}\\n# Content for {file_path_rel}\\n# ... (actual content would follow)\\n\\n")
         commands.append("# --- END OF GENERATED COMMANDS ---")
         
         logger.info("Generated list of %%writefile commands.")
@@ -2531,7 +2532,7 @@ def write_all_files(project_root_dir: str):
 
     if __name__ == "__main__":
         if 'PROJECT_ROOT_DIR' in globals():
-            commands_str = generate_writefile_commands(PROJECT_ROOT_DIR)
+            commands_str = generate_writefile_commands(globals().get('PROJECT_ROOT_DIR', os.getcwd()))
             print(commands_str)
         else:
             logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -2539,12 +2540,12 @@ def write_all_files(project_root_dir: str):
             print("Please define PROJECT_ROOT_DIR to generate specific %%writefile commands.")
     """)
 
-    # new_features/feature_integration_pipeline.py content (The 5000 features framework)
-    feature_integration_pipeline_py_content = textwrap.dedent("""\
+    # new_features/feature_integration_pipeline.py content (UPDATED for CSV path)
+    feature_integration_pipeline_py_content = textwrap.dedent("""\\
     import logging
     import os
     import pandas as pd
-    from typing import List, Dict, Any, Optional
+    from typing import List, Dict, Any, Optional, Union # Added Union
 
     # Import new feature modules
     from new_features.advanced_tts_controls import apply_emotional_tone, adjust_speech_rate_and_pitch, insert_pauses, perform_voice_cloning
@@ -2555,11 +2556,12 @@ def write_all_files(project_root_dir: str):
     from new_features.multilingual_support import translate_text, generate_multilingual_captions, detect_language
     from new_features.niche_content_specialization import generate_niche_specific_script, select_niche_visual_style, integrate_community_feedback
     from new_features.integrated_music_library import search_music_by_mood_genre, analyze_audio_for_beats, integrate_music_with_video_sync
-    from new_features.cost_analyzer import cost_analyzer # Global instance
+    from new_features.cost_analyzer import cost_analyzer
 
     logger = logging.getLogger(__name__)
 
-    FEATURES_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'einstein_coder_5000_features.csv')
+    # UPDATED PATH: The CSV is now expected inside the new_features directory
+    FEATURES_CSV_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'einstein_coder_5000_features.csv')
 
     def load_features_from_csv(csv_path: str) -> pd.DataFrame:
         """Loads features from the CSV file."""
@@ -2568,7 +2570,7 @@ def write_all_files(project_root_dir: str):
             return pd.DataFrame()
         try:
             df = pd.read_csv(csv_path)
-            logger.info(f"Loaded {len(df)} features from CSV.")
+            logger.info(f"Loaded {len(df)} features from CSV: {csv_path}")
             return df
         except Exception as e:
             logger.error(f"Error loading features CSV {csv_path}: {e}", exc_info=True)
@@ -2589,126 +2591,153 @@ def write_all_files(project_root_dir: str):
         feature_name = feature_row['Feature Name'].iloc[0]
         category = feature_row['Category'].iloc[0]
         description = feature_row['Description'].iloc[0]
+        status = feature_row['Status'].iloc[0]
+        priority = feature_row['Priority'].iloc[0]
+        owner = feature_row['Owner'].iloc[0]
 
-        logger.info(f"Executing feature (ID: {feature_id}, Category: {category}): {feature_name} - {description}")
+        logger.info(f"Attempting to execute feature (ID: {feature_id}, Category: {category}, Status: {status}, Priority: {priority}, Owner: {owner}): {feature_name} - {description}")
 
         updated_state = current_project_state.copy()
 
-        # --- Feature Dispatching Logic (Conceptual) ---
-        # This is where you would call the actual implementation functions
-        # from the respective new_features modules based on the category and feature name.
-
         if category == "Templates":
             if "Job Queue" in feature_name:
-                logger.info(f"Feature: Implement Job Queue (Templates v2).")
-                # TODO: Integrate with a job queuing system (e.g., Celery, GCP Cloud Tasks)
+                logger.info(f"  -> Feature: Implement Job Queue (Templates v2). (Action: Log conceptual task)")
             elif "Conversion Tracking" in feature_name:
-                logger.info(f"Feature: Implement Conversion Tracking (Templates v3).")
-                # TODO: Implement analytics events and tracking pixels
+                logger.info(f"  -> Feature: Implement Conversion Tracking (Templates v3). (Action: Log conceptual task)")
+        
         elif category == "Analytics":
-            if "AI Image Generation" in feature_name and "Analytics" in feature_name: # AI Image Gen (Analytics v4)
-                logger.info(f"Feature: Analyze AI Image Generation analytics (v4).")
-                # This would typically read logs or data from image_video_generation calls
-                cost_analyzer.record_usage('ai_image_gen', 'images', 1) # Example usage recording
-                logger.info(f"Current estimated AI Image Gen cost: ${cost_analyzer.cost_metrics.get('ai_image_gen', 0.0):.4f}")
+            if "AI Image Generation (Analytics v4)" == feature_name:
+                logger.info(f"  -> Feature: Analyze AI Image Generation analytics (v4). (Action: Record cost)")
+                cost_analyzer.record_usage('ai_image_gen', 'images', 1)
+                logger.info(f"    -> Current estimated AI Image Gen cost: ${cost_analyzer.cost_metrics.get('ai_image_gen', 0.0):.4f}")
+
         elif category == "AI Integration":
             if "Motion Tracking" in feature_name:
-                logger.info(f"Feature: Implement Motion Tracking (AI Integration v5).")
-                # This would involve `dynamic_visual_cues.py` or a new module
-                # Example: updated_state['video_path'] = apply_smart_cropping_reframing(updated_state['video_path'], "temp_output.mp4")
+                logger.info(f"  -> Feature: Implement Motion Tracking (AI Integration v5). (Action: Call dynamic_visual_cues.py)")
+                if 'video_path' in updated_state and os.path.exists(updated_state['video_path']):
+                    output_path = updated_state['video_path'].replace(".mp4", "_motion_tracked.mp4")
+                    motion_tracked_video = apply_smart_cropping_reframing(updated_state['video_path'], output_path, target_aspect_ratio="9:16")
+                    if motion_tracked_video:
+                        updated_state['video_path'] = motion_tracked_video
+                else:
+                    logger.warning(f"    -> Skipping Motion Tracking: No valid video_path in state.")
+
         elif category == "Engagement":
             if "Animated Captions" in feature_name:
-                logger.info(f"Feature: Implement Animated Captions (Engagement v6).")
-                # This would involve `media_processing/video_editor.py` for burning
-                # and potentially a new subtitle animation module.
-        # --- Add more `elif` blocks for other categories and features ---
-        # For example:
+                logger.info(f"  -> Feature: Implement Animated Captions (Engagement v6). (Action: Log conceptual task)")
+            # You'd add more engagement-related features here, like automated actions, ghost mode, etc.
+
         elif category == "Audio & Voice Enhancements":
-            if "Voice Synthesis" in feature_name:
-                # Example: Call apply_emotional_tone or adjust_speech_rate_and_pitch
-                logger.info(f"Feature: Advanced Voice Synthesis control (e.g., emotional tone).")
-                # updated_state['script'] = apply_emotional_tone(updated_state['script'], "joyful")
-            elif "Music Integration" in feature_name:
-                logger.info(f"Feature: AI-powered music selection and beat detection.")
-                # music_tracks = search_music_by_mood_genre("upbeat", "electronic", 60)
-                # beat_times = analyze_audio_for_beats(music_tracks[0]) if music_tracks else []
-                # integrate_music_with_video_sync(current_project_state.get('video_path'), music_tracks[0], beat_times, "output_synced.mp4")
+            if "Voice Cloning Integration" == feature_name:
+                logger.info(f"  -> Feature: Integrate Voice Cloning. (Action: Call advanced_tts_controls.py)")
+                dummy_input_audio = "/tmp/tiktok_project_runtime/audio/dummy_voice_sample.mp3"
+                os.makedirs(os.path.dirname(dummy_input_audio), exist_ok=True)
+                with open(dummy_input_audio, 'w') as f: f.write("DUMMY VOICE SAMPLE")
+                
+                if 'script' in updated_state and os.path.exists(dummy_input_audio):
+                    cloned_audio = perform_voice_cloning(dummy_input_audio, updated_state['script'])
+                    if cloned_audio:
+                        updated_state['narration_audio_path'] = cloned_audio
+                        logger.info(f"    -> Narration now uses cloned voice: {cloned_audio}")
+                else:
+                    logger.warning(f"    -> Skipping Voice Cloning: No script or dummy audio found.")
+
+            elif "AI Music Selection" == feature_name:
+                logger.info(f"  -> Feature: AI-powered music selection and beat detection. (Action: Call integrated_music_library.py)")
+                music_tracks = search_music_by_mood_genre("upbeat", "cinematic", 60)
+                if music_tracks:
+                    beat_times = analyze_audio_for_beats(music_tracks[0])
+                    logger.info(f"    -> Detected {len(beat_times)} beats in selected music.")
+                    updated_state['background_music_path'] = music_tracks[0]
+                else:
+                    logger.warning(f"    -> No music found for AI Music Selection.")
+
         elif category == "Captions & Subtitles Enhancements":
-            if "Multilingual Captions" in feature_name:
-                logger.info(f"Feature: Generate multilingual captions.")
-                # original_subs = current_project_state.get('subtitle_entries', [])
-                # multilingual_subs = generate_multilingual_captions(original_subs, ["es", "fr"])
-                # updated_state['multilingual_subtitles'] = multilingual_subs
+            if "Multilingual Captions (Auto)" == feature_name:
+                logger.info(f"  -> Feature: Auto-generate multilingual captions. (Action: Call multilingual_support.py)")
+                dummy_captions = [{"text": "Hello world", "start_time_s": 0.0, "end_time_s": 1.5}]
+                multilingual_subs = generate_multilingual_captions(dummy_captions, ["es", "fr"])
+                updated_state['multilingual_subtitles'] = multilingual_subs
+                logger.info(f"    -> Generated captions in: {list(multilingual_subs.keys())}")
+            elif "Animated & Styled Captions" == feature_name:
+                logger.info(f"  -> Feature: Implement Animated & Styled Captions. (Action: Log conceptual task)")
+
         elif category == "Scheduling, Orchestration & Automation":
-            if "Content Calendar" in feature_name:
-                logger.info(f"Feature: Content Calendar & Scheduling system.")
-            elif "Multi-Agent" in feature_name:
-                logger.info(f"Feature: Multi-Agent & Parallel Architecture.")
+            if "Content Calendar & Scheduling" == feature_name:
+                logger.info(f"  -> Feature: Build a Content Calendar & Scheduling system. (Action: Log conceptual task)")
+            elif "Multi-Agent Architecture" == feature_name:
+                logger.info(f"  -> Feature: Deploy specialized agents and enable parallel generation. (Action: Log conceptual task)")
+
         elif category == "Monetization & Rapid Growth":
-            if "Affiliate & TikTok Shop Integration" in feature_name:
-                logger.info(f"Feature: Auto-generate product videos for TikTok Shop.")
+            if "Affiliate & TikTok Shop Integration" == feature_name:
+                logger.info(f"  -> Feature: Auto-generate product videos for TikTok Shop. (Action: Log conceptual task)")
+
         elif category == "Compliance, Safety & Trust":
-            if "AI Content Moderation" in feature_name:
-                logger.info(f"Feature: AI content moderation for visuals, audio, text.")
+            if "AI Content Moderation (Visual)" == feature_name:
+                logger.info(f"  -> Feature: Integrate AI to automatically moderate visuals. (Action: Log conceptual task)")
+            elif "Watermarking & AI Labeling" == feature_name:
+                logger.info(f"  -> Feature: Automatically add visible/invisible watermarks. (Action: Conceptual call to dynamic_visual_cues or ffmpeg_utils)")
+
         elif category == "Tech Stack & Infrastructure":
-            logger.info(f"Feature: Tech Stack & Infrastructure related update/tracking.")
+            if "Centralized Config Management" == feature_name:
+                logger.info(f"  -> Feature: Centralized config management (already implemented conceptually in config.py).")
 
         else:
-            logger.info(f"No specific implementation logic yet for feature: {feature_name} in category {category}.")
+            logger.info(f"  -> No specific implementation logic yet for feature: {feature_name} in category {category}.")
 
+        logger.info(f"  -> Feature {feature_id} execution simulated/completed.")
         return updated_state
 
     def run_all_features_pipeline(initial_project_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Conceptually runs a pipeline that incorporates all new features.
-        This function iterates through all features in the CSV and "executes" them conceptually.
+        Conceptually runs a pipeline that iterates through all new features
+        defined in the CSV and "executes" them, updating a conceptual project state.
         """
-        logger.info("Initiating the '5000 Features' integration pipeline.")
+        logger.info("Initiating the '5000 Features' integration pipeline (conceptual run).")
         df_features = load_features_from_csv(FEATURES_CSV_PATH)
         
         current_state = initial_project_state if initial_project_state is not None else {}
         
-        # Example: Add some dummy initial state if none provided
         if 'script' not in current_state:
-            current_state['script'] = "This is a sample script for feature testing."
+            current_state['script'] = "This is a sample script for feature testing and expansion."
         if 'video_path' not in current_state:
-            current_state['video_path'] = "/tmp/tiktok_project_runtime/output/dummy_video_for_features.mp4"
-            # Ensure dummy video exists for placeholder operations
-            os.makedirs(os.path.dirname(current_state['video_path']), exist_ok=True)
-            with open(current_state['video_path'], 'w') as f:
+            dummy_video_path = "/tmp/tiktok_project_runtime/output/dummy_video_for_features.mp4"
+            os.makedirs(os.path.dirname(dummy_video_path), exist_ok=True)
+            with open(dummy_video_path, 'w') as f:
                 f.write("DUMMY VIDEO CONTENT FOR FEATURE PIPELINE")
+            current_state['video_path'] = dummy_video_path
+            logger.info(f"Created dummy video for feature pipeline at: {dummy_video_path}")
 
-        # Iterate through features (you might want to prioritize based on Status/Priority)
+
         for index, row in df_features.iterrows():
             feature_id = row['Feature ID']
-            logger.info(f"Processing feature ID: {feature_id} - {row['Feature Name']}")
             current_state = execute_feature_by_id(feature_id, current_state)
             
         logger.info("Finished '5000 Features' integration pipeline (conceptual).")
-        logger.info(f"Total estimated cost from feature integration: ${cost_analyzer.get_total_cost():.4f}")
+        logger.info(f"Total estimated cost from conceptual feature integration: ${cost_analyzer.get_total_cost():.4f}")
         return current_state
 
     if __name__ == "__main__":
         if not logging.getLogger().handlers:
             logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         
-        # Ensure the dummy CSV is accessible if running standalone
-        # In Colab, the main notebook will write the CSV.
-        current_script_dir = os.path.dirname(os.path.abspath(__file__))
+        # This block is for testing this file standalone.
+        # In the main Colab notebook, the features CSV is written by Cell 25.
+        
         if not os.path.exists(FEATURES_CSV_PATH):
-            logger.warning(f"Feature CSV not found at {FEATURES_CSV_PATH}. Creating a dummy one.")
+            logger.warning(f"Feature CSV not found at {FEATURES_CSV_PATH}. Creating a dummy one for standalone test.")
             dummy_data = {
-                'Feature ID': [1, 2, 3, 4, 5],
-                'Category': ['Templates', 'Analytics', 'AI Integration', 'Engagement', 'Audio & Voice Enhancements'],
-                'Feature Name': ['Job Queue (Templates v2)', 'Conversion Tracking (Templates v3)', 'AI Image Generation (Analytics v4)', 'Motion Tracking (AI Integration v5)', 'Animated Captions (Engagement v6)'],
-                'Description': ['Manage multiple processing tasks asynchronously', 'Track clicks and conversions', 'Create unique images for scenes', 'Track and overlay graphics', 'Add animated, styled captions'],
-                'Status': ['Idea', 'Idea', 'Idea', 'In Progress', 'Idea'],
-                'Priority': ['Low', 'Medium', 'Medium', 'High', 'Medium'],
-                'Owner': ['Eve', 'Dave', 'Eve', 'Eve', 'Judy'],
-                'Notes': ['Auto-generated', 'Auto-generated', 'Auto-generated', 'Auto-generated', 'Auto-generated']
+                'Feature ID': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                'Category': ['Templates', 'Analytics', 'AI Integration', 'Engagement', 'Audio & Voice Enhancements', 'Audio & Voice Enhancements', 'Captions & Subtitles Enhancements', 'Scheduling, Orchestration & Automation', 'Monetization & Rapid Growth', 'Compliance, Safety & Trust'],
+                'Feature Name': ['Job Queue (Templates v2)', 'Conversion Tracking (Templates v3)', 'AI Image Generation (Analytics v4)', 'Motion Tracking (AI Integration v5)', 'Voice Cloning Integration', 'AI Music Selection', 'Multilingual Captions (Auto)', 'Content Calendar & Scheduling', 'Affiliate & TikTok Shop Integration', 'AI Content Moderation (Visual)'],
+                'Description': ['Manage tasks', 'Track conversions', 'Create images', 'Track objects', 'Clone voices', 'Select music', 'Translate captions', 'Schedule content', 'Generate product videos', 'Moderate content'],
+                'Status': ['Idea', 'Idea', 'Idea', 'In Progress', 'Idea', 'Idea', 'Idea', 'Idea', 'Idea', 'Idea'],
+                'Priority': ['Low', 'Medium', 'Medium', 'High', 'High', 'Medium', 'High', 'Medium', 'Medium', 'High'],
+                'Owner': ['Eve', 'Dave', 'Eve', 'Eve', 'Charlie', 'Frank', 'Alice', 'Grace', 'David', 'Eve'],
+                'Notes': ['Dummy feature', 'Dummy feature', 'Dummy feature', 'Dummy feature', 'Dummy feature', 'Dummy feature', 'Dummy feature', 'Dummy feature', 'Dummy feature', 'Dummy feature']
             }
             pd.DataFrame(dummy_data).to_csv(FEATURES_CSV_PATH, index=False)
-            logger.info("Dummy features CSV created.")
+            logger.info("Dummy features CSV created for standalone test.")
 
         final_state = run_all_features_pipeline()
         print("\\nFinal Project State after conceptual feature integration:")
@@ -2770,7 +2799,7 @@ def write_all_files(project_root_dir: str):
 # This is the entry point if this script is executed directly (not common in Colab setup)
 if __name__ == "__main__":
     if 'PROJECT_ROOT_DIR' in globals():
-        write_all_files(PROJECT_ROOT_DIR)
+        write_all_files(globals()['PROJECT_ROOT_DIR'])
     else:
         logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
         logger.error("PROJECT_ROOT_DIR not defined. Cannot run batch write.")

@@ -2,11 +2,29 @@ import google.generativeai as genai
 import logging
 import time
 from typing import Optional, List, Dict, Any, Tuple
+import requests # Needed for retry decorator
 
 from config import GLOBAL_CONFIG
 from google.colab import userdata # For getting secrets directly
 
 logger = logging.getLogger(__name__)
+
+# Basic retry decorator for API calls
+def retry(max_attempts=3, delay_seconds=2, catch_errors=(requests.exceptions.RequestException, genai.types.BlockedPromptException, genai.types.APIError)):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    return func(*args, **kwargs)
+                except catch_errors as e:
+                    logger.warning(f"Attempt {attempt}/{max_attempts} failed for {func.__name__}: {e}")
+                    if attempt < max_attempts:
+                        time.sleep(delay_seconds)
+                    else:
+                        logger.error(f"All {max_attempts} attempts failed for {func.__name__}.")
+                        raise
+        return wrapper
+    return decorator
 
 def configure_gemini():
     """Configures the Gemini API client using the API key from GLOBAL_CONFIG."""
@@ -22,24 +40,22 @@ def configure_gemini():
         logger.error(f"Failed to configure Gemini API: {e}", exc_info=True)
         return False
 
+@retry(max_attempts=3, delay_seconds=5) # Apply retry decorator
 def generate_script_with_gemini(
     video_subject: str,
     keywords: List[str] = [],
     num_paragraphs: int = 5,
     style: str = "engaging and informative",
-    max_retries: int = 3,
-    retry_delay_s: int = 5
 ) -> Optional[str]:
     """
     Generates a script for a short-form video using Google Gemini Pro.
+    Includes a refined prompt.
 
     Args:
         video_subject (str): The main topic of the video.
         keywords (List[str]): Additional keywords to include in the script.
         num_paragraphs (int): Desired number of paragraphs for the script.
         style (str): The writing style for the script (e.g., "humorous", "educational").
-        max_retries (int): Maximum number of retries for API call.
-        retry_delay_s (int): Delay between retries in seconds.
 
     Returns:
         Optional[str]: The generated script as a string, or None if generation fails.
@@ -49,41 +65,42 @@ def generate_script_with_gemini(
 
     model = genai.GenerativeModel(GLOBAL_CONFIG['gemini_settings']['text_generation_model'])
     
+    keywords_str = f"Include these keywords: {', '.join(keywords)}." if keywords else ""
     prompt = f"""
-    Generate an {style} script for a short-form video (e.g., TikTok, YouTube Shorts) about: "{video_subject}".
-    
-    Include the following details/keywords if relevant: {', '.join(keywords)}.
+    You are an expert short-form video content creator.
+    Generate a highly **{style}** and **concise** script for a social media video (e.g., TikTok, YouTube Shorts).
+
+    The video is about: **"{video_subject}"**.
+    {keywords_str}
     
     The script should be approximately {num_paragraphs} paragraphs long.
-    Focus on being concise and impactful, suitable for a fast-paced video.
+    Each paragraph should be short, punchy, and suitable for quick cuts in a video.
+    Focus on hooks, clear explanations, and a strong call to action (if applicable).
+    Ensure the language is appropriate for a broad audience.
     """
     
-    logger.info(f"Attempting to generate script with Gemini for subject: '{video_subject}'")
+    logger.info(f"Attempting to generate script with Gemini for subject: '{video_subject}' and style: '{style}'")
 
-    for attempt in range(max_retries):
-        try:
-            response = model.generate_content(prompt)
-            script_content = response.text.strip()
-            logger.info("Script generated successfully with Gemini.")
-            return script_content
-        except Exception as e:
-            logger.warning(f"Attempt {attempt + 1}/{max_retries} failed to generate script with Gemini: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay_s)
-            else:
-                logger.error(f"All {max_retries} attempts failed to generate script with Gemini.", exc_info=True)
-                return None
+    try:
+        response = model.generate_content(prompt)
+        script_content = response.text.strip()
+        logger.info("Script generated successfully with Gemini.")
+        return script_content
+    except genai.types.BlockedPromptException as e:
+        logger.error(f"Gemini script generation blocked due to safety concerns: {e}")
+        raise # Re-raise to trigger retry decorator, or handle specifically
+    except genai.types.APIError as e:
+        logger.error(f"Gemini API error during script generation: {e}")
+        raise # Re-raise to trigger retry decorator
+    except Exception as e:
+        logger.error(f"An unexpected error occurred during script generation: {e}", exc_info=True)
+        return None
 
+@retry(max_attempts=3, delay_seconds=10) # Longer delay for vision API
 def analyze_video_with_gemini_vision(video_path: str, question: str) -> Optional[str]:
     """
     Analyzes a video file using Gemini 1.5 Pro's multimodal capabilities.
-
-    Args:
-        video_path (str): The local path to the video file.
-        question (str): The question to ask about the video.
-
-    Returns:
-        Optional[str]: The AI's answer, or None if analysis fails.
+    Includes retry logic.
     """
     if not configure_gemini():
         return None
@@ -94,10 +111,6 @@ def analyze_video_with_gemini_vision(video_path: str, question: str) -> Optional
 
     model = genai.GenerativeModel(GLOBAL_CONFIG['gemini_settings']['video_analysis_model'])
 
-    # Prepare the video file for upload to Gemini
-    # For large files, Gemini API might require a different upload mechanism or local processing.
-    # The current genai.upload_file handles it for reasonably sized files.
-    
     max_file_size_mb = GLOBAL_CONFIG['gemini_settings']['video_analysis_max_file_size_mb']
     file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
     if file_size_mb > max_file_size_mb:
@@ -110,21 +123,22 @@ def analyze_video_with_gemini_vision(video_path: str, question: str) -> Optional
         video_file_obj = genai.upload_file(video_path)
         logger.info(f"Video {video_path} uploaded successfully to Gemini.")
         
-        # Give some time for file processing on the API side (optional, but good practice)
-        # In a real application, you'd poll for status if needed, but generate_content handles it.
-        # time.sleep(10) 
-
         contents = [video_file_obj, question]
         response = model.generate_content(contents)
         result = response.text.strip()
         logger.info("Gemini Vision analysis completed.")
         return result
 
+    except genai.types.BlockedPromptException as e:
+        logger.error(f"Gemini video analysis blocked due to safety concerns: {e}")
+        raise
+    except genai.types.APIError as e:
+        logger.error(f"Gemini API error during video analysis: {e}")
+        raise
     except Exception as e:
-        logger.error(f"Gemini Vision analysis failed for {video_path}: {e}", exc_info=True)
+        logger.error(f"An unexpected error occurred during video analysis for {video_path}: {e}", exc_info=True)
         return None
     finally:
-        # Clean up the uploaded file from Gemini's temporary storage
         if video_file_obj:
             try:
                 genai.delete_file(video_file_obj.name)

@@ -1,4 +1,6 @@
 import logging
+import os
+import shutil # Added for dummy file creation
 from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -32,6 +34,7 @@ def insert_pauses(text: str, pause_duration_ms: int = 500) -> str:
     logger.info(f"Inserting {pause_duration_ms}ms pauses into text: '{text[:50]}...'")
     # TODO: Implement parsing text to strategically insert <break> tags
     # For now, it's a conceptual addition.
+    # Simple conceptual example:
     return text.replace(".", f". <break time='{pause_duration_ms}ms'/>").replace(",", f", <break time='{pause_duration_ms}ms'/>")
 
 def perform_voice_cloning(input_audio_path: str, text_to_synthesize: str) -> Optional[str]:
@@ -47,6 +50,7 @@ def perform_voice_cloning(input_audio_path: str, text_to_synthesize: str) -> Opt
     
     # Placeholder for output
     output_path = f"/tmp/tiktok_project_runtime/audio/cloned_voice_{hash(text_to_synthesize)}.mp3"
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, 'w') as f:
         f.write("DUMMY CLONED VOICE AUDIO")
     logger.info(f"Placeholder voice clone audio created at: {output_path}")
