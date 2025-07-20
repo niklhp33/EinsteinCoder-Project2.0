@@ -1,3 +1,4 @@
+# config.py (FIXED: Multi-line string termination)
 import os
 import logging
 
@@ -43,21 +44,21 @@ GLOBAL_CONFIG = {
     },
 
     'gcp': {
-        'project_id': _get_secret('GCP_PROJECT_ID', 'your-gcp-project-id'),
-        'service_account_key_path': os.path.join(os.path.expanduser('~'), '.config', 'gcloud', 'application_default_credentials.json'), # Default path for Colab
+        'project_id': _get_secret('GCP_PROJECT_ID', 'goldenglory'),
+        'service_account_key_path': os.path.join(os.path.expanduser('~'), '.config', 'gcloud', 'application_default_credentials.json'),
         'gcs_bucket_name': _get_secret('GCS_BUCKET_NAME', 'your-gcs-bucket-name'),
     },
 
     'video_settings': {
         'default_video_source_type': 'Stock Footage (Pexels/Pixabay)',
         'default_concat_mode': 'Random Concatenation (Recommended)',
-        'default_transition_mode': 'Fade',
+        'default_transition_mode': 'None', # Set default transition to NONE to bypass crossfade issues
         'default_transition_duration': 0.5,
         'default_video_language': 'English',
     },
 
     'audio_settings': {
-        'default_narration_voice': 'en-US-Wavenet-C',
+        'default_narration_voice': 'gTTS (Basic)', # Set to gTTS as basic reliable fallback
         'default_background_music_query': 'upbeat cinematic',
         'default_background_music_volume': -15
     },
@@ -78,15 +79,19 @@ GLOBAL_CONFIG = {
         'video_analysis_max_file_size_mb': 200
     },
     'api_timeouts': {
-        'speech_to_text_timeout_s': 300 # Timeout for long-running STT operations
+        'speech_to_text_timeout_s': 300
     }
 }
 
 def setup_runtime_directories():
-    """Ensures local runtime directories as defined in GLOBAL_CONFIG exist."""
+    """
+    Ensures all necessary local runtime directories exist.
+    This function creates the /tmp/tiktok_project_runtime and its subfolders.
+    """ # <<< FIX: Ensure this triple quote is correctly closed
+    _logger = logging.getLogger(__name__)
     base_dir = GLOBAL_CONFIG['paths']['base_dir']
     for key, path in GLOBAL_CONFIG['paths'].items():
-        if key.endswith('_dir'): # Only process directory paths
+        if key.endswith('_dir'):
             full_path = os.path.join(base_dir if key != 'base_dir' else '', path)
             os.makedirs(full_path, exist_ok=True)
-            logging.getLogger(__name__).info(f"Ensured runtime directory: {full_path}")
+            _logger.info(f"Ensured runtime directory: {full_path}")

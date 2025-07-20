@@ -2,27 +2,36 @@ import google.generativeai as genai
 import logging
 import time
 from typing import Optional, List, Dict, Any, Tuple
-import requests # Needed for retry decorator
+import requests # Needed for retry decorator (for requests.exceptions.RequestException)
 
 from config import GLOBAL_CONFIG
-from google.colab import userdata # For getting secrets directly
+import functools # For functools.wraps (best practice for decorators)
 
 logger = logging.getLogger(__name__)
 
-# Basic retry decorator for API calls
-def retry(max_attempts=3, delay_seconds=2, catch_errors=(requests.exceptions.RequestException, genai.types.BlockedPromptException, genai.types.APIError)):
+# --- FIX: Adjusted catch_errors to remove genai.types.APIError ---
+# This version removes genai.types.APIError from the caught exceptions.
+def retry(max_attempts=3, delay_seconds=2, catch_errors=(requests.exceptions.RequestException, genai.types.BlockedPromptException)):
     def decorator(func):
+        @functools.wraps(func) # Use functools.wraps
         def wrapper(*args, **kwargs):
             for attempt in range(1, max_attempts + 1):
                 try:
                     return func(*args, **kwargs)
                 except catch_errors as e:
-                    logger.warning(f"Attempt {attempt}/{max_attempts} failed for {func.__name__}: {e}")
+                    logger.warning(f"Attempt {attempt}/{max_attempts} failed for {func.__name__}: {type(e).__name__} - {e}")
                     if attempt < max_attempts:
                         time.sleep(delay_seconds)
                     else:
-                        logger.error(f"All {max_attempts} attempts failed for {func.__name__}.")
-                        raise
+                        logger.error(f"All {max_attempts} attempts failed for {func.__name__}. Last error: {type(e).__name__} - {e}")
+                        raise # Re-raise the last caught error
+                except Exception as e: # Catch any other unexpected exceptions from the API/library
+                    logger.warning(f"Attempt {attempt}/{max_attempts} caught unexpected error for {func.__name__}: {type(e).__name__} - {e}")
+                    if attempt < max_attempts:
+                        time.sleep(delay_seconds)
+                    else:
+                        logger.error(f"All {max_attempts} attempts failed for {func.__name__}. Last unexpected error: {type(e).__name__} - {e}", exc_info=True)
+                        raise # Re-raise the unexpected error
         return wrapper
     return decorator
 
@@ -61,10 +70,10 @@ def generate_script_with_gemini(
         Optional[str]: The generated script as a string, or None if generation fails.
     """
     if not configure_gemini():
-        return None
+        return None 
 
     model = genai.GenerativeModel(GLOBAL_CONFIG['gemini_settings']['text_generation_model'])
-    
+
     keywords_str = f"Include these keywords: {', '.join(keywords)}." if keywords else ""
     prompt = f"""
     You are an expert short-form video content creator.
@@ -72,29 +81,19 @@ def generate_script_with_gemini(
 
     The video is about: **"{video_subject}"**.
     {keywords_str}
-    
+
     The script should be approximately {num_paragraphs} paragraphs long.
     Each paragraph should be short, punchy, and suitable for quick cuts in a video.
     Focus on hooks, clear explanations, and a strong call to action (if applicable).
     Ensure the language is appropriate for a broad audience.
     """
-    
+
     logger.info(f"Attempting to generate script with Gemini for subject: '{video_subject}' and style: '{style}'")
 
-    try:
-        response = model.generate_content(prompt)
-        script_content = response.text.strip()
-        logger.info("Script generated successfully with Gemini.")
-        return script_content
-    except genai.types.BlockedPromptException as e:
-        logger.error(f"Gemini script generation blocked due to safety concerns: {e}")
-        raise # Re-raise to trigger retry decorator, or handle specifically
-    except genai.types.APIError as e:
-        logger.error(f"Gemini API error during script generation: {e}")
-        raise # Re-raise to trigger retry decorator
-    except Exception as e:
-        logger.error(f"An unexpected error occurred during script generation: {e}", exc_info=True)
-        return None
+    response = model.generate_content(prompt)
+    script_content = response.text.strip()
+    logger.info("Script generated successfully with Gemini.")
+    return script_content
 
 @retry(max_attempts=3, delay_seconds=10) # Longer delay for vision API
 def analyze_video_with_gemini_vision(video_path: str, question: str) -> Optional[str]:
@@ -121,23 +120,14 @@ def analyze_video_with_gemini_vision(video_path: str, question: str) -> Optional
     video_file_obj = None
     try:
         video_file_obj = genai.upload_file(video_path)
-        logger.info(f"Video {video_path} uploaded successfully to Gemini.")
-        
+        logger.info(f"Video {video_file_obj.name} uploaded successfully to Gemini.")
+
         contents = [video_file_obj, question]
         response = model.generate_content(contents)
         result = response.text.strip()
         logger.info("Gemini Vision analysis completed.")
         return result
 
-    except genai.types.BlockedPromptException as e:
-        logger.error(f"Gemini video analysis blocked due to safety concerns: {e}")
-        raise
-    except genai.types.APIError as e:
-        logger.error(f"Gemini API error during video analysis: {e}")
-        raise
-    except Exception as e:
-        logger.error(f"An unexpected error occurred during video analysis for {video_path}: {e}", exc_info=True)
-        return None
     finally:
         if video_file_obj:
             try:

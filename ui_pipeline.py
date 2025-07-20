@@ -1,3 +1,4 @@
+# Cell (X): ui_pipeline.py (FIXED: Enable Gradio Queue)
 import gradio as gr
 import logging
 import os
@@ -10,11 +11,8 @@ from pipeline import generate_video_pipeline # Import the main pipeline
 
 logger = logging.getLogger(__name__)
 
-# Ensure logging is configured before Gradio starts
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# --- Gradio Interface Functions ---
 
 def run_pipeline_ui(
     video_subject: str,
@@ -39,9 +37,9 @@ def run_pipeline_ui(
     """
     Wrapper function to run the video generation pipeline from Gradio UI.
     """
-    logger.info("Gradio UI: Video generation started.")
+    print("DEBUG: run_pipeline_ui HAS BEEN CALLED!") # CRITICAL DEBUG PRINT
+    logger.info("Gradio UI: Video generation started.") 
     
-    # Map string inputs from Gradio to Enum types for VideoParams
     try:
         params = VideoParams(
             video_subject=video_subject,
@@ -67,9 +65,9 @@ def run_pipeline_ui(
         logger.error(f"Gradio UI: Invalid input parameter: {e}")
         return None, None, f"Error: Invalid input parameter: {e}. Please check your selections."
 
-    status_message = "Video generation in progress... Check logs for details."
-    
-    # Call the main pipeline function
+    # Initial status update for the UI
+    yield None, None, "Video generation in progress... Please wait." # Yield to update UI immediately
+
     final_video_path, log_path = generate_video_pipeline(params)
 
     if final_video_path and os.path.exists(final_video_path):
@@ -180,6 +178,7 @@ def launch_gradio_ui():
         
         generate_btn = gr.Button("🚀 Generate Video", variant="primary")
 
+        # Define outputs BEFORE they are referenced in generate_btn.click
         with gr.Row():
             video_output = gr.Video(label="Generated Video", interactive=False)
         with gr.Row():
@@ -211,8 +210,9 @@ def launch_gradio_ui():
             ],
             outputs=[video_output, log_output, status_text]
         )
-    
-    demo.launch(debug=True, share=True)
+        
+        # --- FIX: Enable Gradio Queue for generator functions ---
+        demo.queue(api_open=False).launch(debug=True, share=True) # api_open=False for security in public demos
 
 if __name__ == "__main__":
     launch_gradio_ui()

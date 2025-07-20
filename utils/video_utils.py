@@ -1,3 +1,4 @@
+# Cell (X): utils/video_utils.py (FIXED: Robust Dummy Video with Audio)
 import logging
 import os
 import shlex
@@ -81,31 +82,27 @@ def download_video_clip(video_url: str, output_path: str) -> Optional[str]:
     """
     Downloads a video clip from a URL.
     Improved with robust error handling and retries.
+    FIX: Create a more robust dummy video with a simple audio track.
     """
     logger.info(f"Attempting to download video clip from {video_url} to {output_path}")
-    
+
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     try:
-        # In a real scenario, this would use `requests` for actual download or a specialized library
-        # response = requests.get(video_url, stream=True, timeout=10)
-        # response.raise_for_status() # Raise an exception for HTTP errors
-        # with open(output_path, 'wb') as out_file:
-        #     for chunk in response.iter_content(chunk_size=8192):
-        #         out_file.write(chunk)
-        # logger.info(f"Successfully downloaded video from {video_url}")
-
-        # For now, still using dummy ffmpeg creation for simulation
+        # Create a dummy video with a silent audio track for robustness
         dummy_cmd = [
             'ffmpeg', '-y',
-            '-f', 'lavfi', '-i', 'color=c=black:s=640x360:d=1',
-            '-vf', 'format=yuv420p',
-            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30',
+            '-f', 'lavfi', '-i', 'color=c=black:s=640x360:d=1', # Video stream
+            '-f', 'lavfi', '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100', # Silent audio stream
+            '-t', '1', # Duration of 1 second
+            '-pix_fmt', 'yuv420p', # Pixel format
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '30', # Video codec
+            '-c:a', 'aac', '-b:a', '128k', # Audio codec
             shlex.quote(output_path)
         ]
         stdout, stderr, returncode = run_shell_command(dummy_cmd, check_error=False, timeout=10)
         if returncode != 0:
-            logger.warning(f"Failed to create dummy video via ffmpeg, creating empty file instead: {stderr}")
+            logger.warning(f"Failed to create dummy video with audio via ffmpeg, creating empty file instead: {stderr}")
             with open(output_path, 'wb') as f:
                 f.write(b'DUMMY VIDEO CONTENT')
         logger.info(f"Simulated video download complete. Dummy file created at: {output_path}")
@@ -129,18 +126,6 @@ def search_pexels_videos(query: str, api_key: str, orientation: str = 'portrait'
     Improved with robust error handling and retries.
     """
     logger.info(f"Simulating Pexels video search for '{query}', orientation: '{orientation}'")
-    # In a real Pexels implementation:
-    # headers = {"Authorization": api_key}
-    # params = {"query": query, "orientation": orientation, "per_page": per_page}
-    # try:
-    #     response = requests.get("https://api.pexels.com/videos/search", headers=headers, params=params, timeout=10)
-    #     response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-    #     data = response.json()
-    #     return data.get('videos', [])
-    # except requests.exceptions.RequestException as e:
-    #     logger.error(f"Pexels API request failed: {e}")
-    #     raise # Re-raise to trigger retry decorator
-
     dummy_videos = []
     for i in range(min(per_page, 3)): # Return a few dummy results
         dummy_videos.append({
@@ -163,17 +148,6 @@ def search_pixabay_videos(query: str, api_key: str, editors_choice: bool = True,
     Improved with robust error handling and retries.
     """
     logger.info(f"Simulating Pixabay video search for '{query}', editors_choice: {editors_choice}")
-    # In a real Pixabay implementation:
-    # params = {"key": api_key, "q": query, "editors_choice": "true" if editors_choice else "false", "per_page": per_page}
-    # try:
-    #     response = requests.get("https://pixabay.com/api/videos/", params=params, timeout=10)
-    #     response.raise_for_status() # Raise HTTPError for bad responses (4xx or 5xx)
-    #     data = response.json()
-    #     return data.get('hits', [])
-    # except requests.exceptions.RequestException as e:
-    #     logger.error(f"Pixabay API request failed: {e}")
-    #     raise # Re-raise to trigger retry decorator
-
     dummy_videos = []
     for i in range(min(per_page, 3)): # Return a few dummy results
         dummy_videos.append({
